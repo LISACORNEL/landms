@@ -11,6 +11,8 @@ an update.
 import frappe
 from frappe import _
 from frappe.model.document import Document
+from frappe.query_builder import Case, DocType
+from frappe.query_builder.functions import Count, Sum
 from frappe.utils import cint, flt, today
 
 from landms.after_submit import drop_rounding_noise_on_locked_fields
@@ -308,19 +310,22 @@ def sync_land_acquisition_plot_summary(land_acquisition):
 			"delivered_plots": 0,
 		}
 
-	counts = frappe.db.sql(
-		"""
-        SELECT
-            COUNT(*) AS total,
-            SUM(status = 'Available') AS available,
-            SUM(status IN ('Pending Fee', 'Pending Advance', 'Reserved', 'Ready for Handover')) AS reserved,
-            SUM(status IN ('Delivered', 'Title Closed')) AS delivered
-        FROM `tabPlot Master`
-        WHERE land_acquisition = %s AND docstatus = 1
-    """,
-		land_acquisition,
-		as_dict=True,
-	)[0]
+	plot = DocType("Plot Master")
+
+	def count_of(statuses):
+		return Sum(Case().when(plot.status.isin(statuses), 1).else_(0))
+
+	counts = (
+		frappe.qb.from_(plot)
+		.select(
+			Count("*").as_("total"),
+			count_of(["Available"]).as_("available"),
+			count_of(["Pending Fee", "Pending Advance", "Reserved", "Ready for Handover"]).as_("reserved"),
+			count_of(["Delivered", "Title Closed"]).as_("delivered"),
+		)
+		.where((plot.land_acquisition == land_acquisition) & (plot.docstatus == 1))
+		.run(as_dict=True)[0]
+	)
 
 	total = int(counts.total or 0)
 	available = int(counts.available or 0)
