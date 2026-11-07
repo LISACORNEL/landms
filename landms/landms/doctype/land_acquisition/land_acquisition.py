@@ -260,9 +260,24 @@ class LandAcquisition(Document):
 # =============================================================================
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
+def refresh_cost_summary(land_acquisition: str):
+	"""The project form's cost panel: recompute, save and return the cost summary.
+
+	Answers anyone who may open the project and refuses everyone else. Read is
+	enough: on live most roles that open a project may only read it.
+	"""
+	frappe.has_permission("Land Acquisition", "read", land_acquisition, throw=True)
+	return sync_land_acquisition_cost_summary(land_acquisition)
+
+
 def sync_land_acquisition_cost_summary(land_acquisition):
-	"""Recompute the cost summary and persist totals on the Land Acquisition."""
+	"""Recompute the cost summary and persist totals on the Land Acquisition.
+
+	Not a web door: the purchase, journal and payment hooks call it for whoever
+	submits those documents, who may have no rights on the project. The form
+	goes through refresh_cost_summary.
+	"""
 	if not land_acquisition or not frappe.db.exists("Land Acquisition", land_acquisition):
 		return {}
 
@@ -285,7 +300,8 @@ def sync_land_acquisition_cost_summary(land_acquisition):
 	return summary
 
 
-@frappe.whitelist()
+# Not a web door: it returns every seller and supplier amount, and only this
+# module's own code reads it (through the doors above, which check permission).
 def get_land_acquisition_cost_summary(land_acquisition):
 	"""Return the consolidated PO/PI/PE rollup for one Land Acquisition.
 
@@ -734,8 +750,23 @@ def _empty_summary(la_name):
 # =============================================================================
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
+def refresh_plot_summary(land_acquisition: str):
+	"""The project form's plot counts: recount, save and return them.
+
+	Answers anyone who may open the project and refuses everyone else.
+	"""
+	frappe.has_permission("Land Acquisition", "read", land_acquisition, throw=True)
+	return sync_land_acquisition_plot_summary(land_acquisition)
+
+
 def sync_land_acquisition_plot_summary(land_acquisition):
+	"""Recount the project's plots by status and save the counts on it.
+
+	Not a web door: plot, application, contract and handover code call it,
+	including for bank callbacks and users with no rights on the project.
+	The form goes through refresh_plot_summary.
+	"""
 	if not land_acquisition or not frappe.db.exists("Land Acquisition", land_acquisition):
 		return {}
 
@@ -928,9 +959,16 @@ def _build_period_summary(years, months, days, total_days):
 # =============================================================================
 
 
-@frappe.whitelist()
-def recalculate_plot_costs(land_acquisition):
-	"""Enqueue a background job to update plot stock valuations to the current LA cost."""
+@frappe.whitelist(methods=["POST"])
+def recalculate_plot_costs(land_acquisition: str):
+	"""Enqueue a background job to update plot stock valuations to the current LA cost.
+
+	System Manager only: it rewrites the stock value of every unsold plot. A plain
+	role check, not frappe.only_for, which is switched off in tests and so could
+	never be proven.
+	"""
+	if "System Manager" not in frappe.get_roles():
+		frappe.throw(_("Only a System Manager can recalculate plot costs."), frappe.PermissionError)
 	la = frappe.db.get_value(
 		"Land Acquisition",
 		land_acquisition,

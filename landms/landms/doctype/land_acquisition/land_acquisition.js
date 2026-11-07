@@ -86,7 +86,8 @@ frappe.ui.form.on("Land Acquisition", {
         "blue"
       );
       _start_recalculation_poll(frm);
-    } else {
+    } else if (frappe.user.has_role("System Manager")) {
+      // The server refuses everyone else; no point offering them the button.
       frm.add_custom_button(__("Recalculate Plot Costs"), () => {
         frappe.confirm(
           __(
@@ -134,7 +135,7 @@ function _start_recalculation_poll(frm) {
 function refresh_cost_summary(frm) {
   frappe.call({
     method:
-      "landms.landms.doctype.land_acquisition.land_acquisition.sync_land_acquisition_cost_summary",
+      "landms.landms.doctype.land_acquisition.land_acquisition.refresh_cost_summary",
     args: { land_acquisition: frm.doc.name },
     callback(r) {
       const summary = r.message || {};
@@ -189,7 +190,7 @@ function refresh_cost_summary(frm) {
 function refresh_plot_counts(frm) {
   frappe.call({
     method:
-      "landms.landms.doctype.land_acquisition.land_acquisition.sync_land_acquisition_plot_summary",
+      "landms.landms.doctype.land_acquisition.land_acquisition.refresh_plot_summary",
     args: { land_acquisition: frm.doc.name },
     callback(r) {
       const s = r.message || {};
