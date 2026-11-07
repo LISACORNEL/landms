@@ -121,6 +121,43 @@ class LandAcquisition(Document):
 			)
 		self._guard_malipopay_switch()
 		self._validate_channel_roles()
+		self._guard_rate_changes()
+
+	def _guard_rate_changes(self):
+		"""Plot type rates on an approved project (LA-8, operator 7 Nov 2026): only a System Manager
+		adds, changes or deletes them; a rate that plots use stays; one row per plot type. A changed
+		rate is kept in the project's history, and approved plots keep their price: a plot copies the
+		rate only while it is a draft."""
+		before = self.get_doc_before_save()
+		old = {row.name: row for row in (before.get("plot_type_rates") if before else [])}
+		new = {row.name: row for row in self.get("plot_type_rates") or []}
+
+		def same(row, stored):
+			return row.plot_type == stored.plot_type and all(
+				flt(row.get(f), row.precision(f)) == flt(stored.get(f), row.precision(f))
+				for f in ("selling_price_per_sqm", "land_rent_rate")
+			)
+
+		removed = [old[n] for n in old if n not in new]
+		changed = [row for n, row in new.items() if n in old and not same(row, old[n])]
+		added = [row for n, row in new.items() if n not in old]
+		if not (removed or changed or added):
+			return
+		if "System Manager" not in frappe.get_roles():
+			frappe.throw(_("Only a System Manager can change plot type rates."), frappe.PermissionError)
+
+		self._validate_plot_type_rates()
+		kept = {row.plot_type for row in new.values()}
+		gone = {r.plot_type for r in removed} | {old[r.name].plot_type for r in changed}
+		for plot_type in sorted(gone - kept):
+			used = {"land_acquisition": self.name, "plot_type": plot_type, "docstatus": ["<", 2]}
+			plots = frappe.get_all("Plot Master", used, pluck="name", order_by="name", limit=3)
+			if plots:
+				frappe.throw(
+					_("{0} is used by {1} plots ({2}), so its rate stays.").format(
+						plot_type, frappe.db.count("Plot Master", used), ", ".join(plots)
+					)
+				)
 
 	def _guard_malipopay_switch(self):
 		"""The Malipopay box on a submitted project (operator, 16 Oct 2026).
