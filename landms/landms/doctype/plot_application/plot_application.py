@@ -170,10 +170,8 @@ class PlotApplication(Document):
 	def _lock_plot_row(self):
 		"""Serialize submit/payment operations per plot to reduce race conditions."""
 		if self.plot:
-			frappe.db.sql(
-				"select name from `tabPlot Master` where name=%s for update",
-				(self.plot,),
-			)
+			# a row lock on the plot (SELECT ... FOR UPDATE), held until this transaction ends
+			frappe.db.get_value("Plot Master", self.plot, "name", for_update=True)
 
 	def _get_other_active_application(self, statuses):
 		return frappe.db.get_value(
