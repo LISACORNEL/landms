@@ -31,9 +31,9 @@ after_migrate = [
 doc_events = {
 	# One settings record per project (LA-7): created with it, complete before submit, deleted with it.
 	"Land Acquisition": {
-		"on_update": "landms.landms.doctype.landms_project_settings.landms_project_settings.ensure_project_settings",
-		"before_submit": "landms.landms.doctype.landms_project_settings.landms_project_settings.check_project_settings_complete",
-		"on_trash": "landms.landms.doctype.landms_project_settings.landms_project_settings.delete_project_settings",
+		"on_update": "landms.landms.doctype.landms_project_setting.landms_project_setting.ensure_project_settings",
+		"before_submit": "landms.landms.doctype.landms_project_setting.landms_project_setting.check_project_settings_complete",
+		"on_trash": "landms.landms.doctype.landms_project_setting.landms_project_setting.delete_project_settings",
 	},
 	"Purchase Order": {
 		"validate": "landms.landms.doctype.land_acquisition.land_acquisition.set_land_acquisition_expense_account",
