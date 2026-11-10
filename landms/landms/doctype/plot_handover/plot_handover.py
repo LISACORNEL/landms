@@ -3,7 +3,6 @@ from frappe.model.document import Document
 from frappe.utils import flt, get_fullname, today
 
 from landms.landms.doctype.land_acquisition.land_acquisition import sync_land_acquisition_plot_summary
-from landms.landms.doctype.plot_master.plot_master import get_plot_item_code
 from landms.landms.doctype.plot_master.plot_status import link, set_plot_status
 
 
@@ -104,15 +103,14 @@ class PlotHandover(Document):
 		plot = frappe.get_doc("Plot Master", self.plot)
 		settings = frappe.get_single("LandMS Settings")
 
+		if not contract.sales_order or not frappe.db.exists("Sales Order", contract.sales_order):
+			frappe.throw(f"Contract {contract.name} has no Sales Order to deliver the plot from.")
 		if not plot.serial_no:
 			frappe.throw(f"Plot {plot.name} is missing its Serial No.")
 
 		self._cancel_blocking_stock_reconciliations(plot.serial_no)
 
-		if contract.sales_order and frappe.db.exists("Sales Order", contract.sales_order):
-			dn = self._make_delivery_note_from_sales_order(contract.sales_order, plot)
-		else:
-			dn = self._make_delivery_note_direct(contract, plot, settings)
+		dn = self._make_delivery_note_from_sales_order(contract.sales_order, plot)
 
 		dn.run_method("set_missing_values")
 		dn.run_method("calculate_taxes_and_totals")
@@ -148,30 +146,6 @@ class PlotHandover(Document):
 			row.incoming_rate = flt(plot.allocated_cost)
 
 		return dn
-
-	def _make_delivery_note_direct(self, contract, plot, settings):
-		item_code = get_plot_item_code(plot.plot_type)
-
-		return frappe.get_doc(
-			{
-				"doctype": "Delivery Note",
-				"customer": contract.customer,
-				"company": settings.company,
-				"set_warehouse": settings.plot_inventory_warehouse,
-				"items": [
-					{
-						"item_code": item_code,
-						"qty": 1,
-						"rate": plot.selling_price,
-						"incoming_rate": flt(plot.allocated_cost),
-						"warehouse": settings.plot_inventory_warehouse,
-						"serial_no": plot.serial_no,
-						"use_serial_batch_fields": 1,
-						"description": f"Plot handover for {plot.name}",
-					}
-				],
-			}
-		)
 
 	def _cancel_blocking_stock_reconciliations(self, serial_no):
 		"""Ensure the serial number is Active and in the correct warehouse
