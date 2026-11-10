@@ -6,7 +6,7 @@ is never changed, and LandMS Settings itself is left untouched.
 
 import frappe
 
-from landms.landms.doctype.landms_project_settings.landms_project_settings import (
+from landms.landms.doctype.landms_project_setting.landms_project_setting import (
 	copy_of_landms_settings,
 	ensure_project_settings,
 )

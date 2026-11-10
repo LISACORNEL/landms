@@ -19,13 +19,13 @@ from frappe.model.workflow import apply_workflow, get_transitions, get_workflow_
 from frappe.tests.utils import FrappeTestCase
 from frappe.utils import today
 
-from landms.landms.doctype.landms_project_settings.landms_project_settings import (
+from landms.landms.doctype.landms_project_setting.landms_project_setting import (
 	accounts_for,
 	copy_of_landms_settings,
 )
 from landms.patches import create_project_settings
 
-SETTINGS = "LandMS Project Settings"
+SETTINGS = "LandMS Project Setting"
 _FORWARD = ("Submit for Approval", "Submit", "Approve")
 # the asterisks of LandMS Settings, plus "Fee Received In" (Lisa, 5 Nov 2026)
 REQUIRED = {

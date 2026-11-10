@@ -1,6 +1,6 @@
 // One settings record per project (LA-7): each account, warehouse and cost centre offers only
 // the project's company.
-frappe.ui.form.on("LandMS Project Settings", {
+frappe.ui.form.on("LandMS Project Setting", {
   setup(frm) {
     frm.meta.fields
       .filter((df) =>

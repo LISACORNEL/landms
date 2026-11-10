@@ -1,4 +1,5 @@
 [pre_model_sync]
+landms.patches.rename_project_settings_doctype
 
 [post_model_sync]
 landms.patches.setup_data.create_roles

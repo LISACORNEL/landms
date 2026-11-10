@@ -588,8 +588,8 @@
  "is_submittable": 1,
  "links": [
   {
-   "group": "Settings",
-   "link_doctype": "LandMS Project Settings",
+   "group": "Setting",
+   "link_doctype": "LandMS Project Setting",
    "link_fieldname": "land_acquisition"
   }
  ],

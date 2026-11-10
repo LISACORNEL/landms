@@ -1,6 +1,6 @@
 {
  "doctype": "DocType",
- "name": "LandMS Project Settings",
+ "name": "LandMS Project Setting",
  "module": "LandMS",
  "autoname": "field:land_acquisition",
  "naming_rule": "By fieldname",

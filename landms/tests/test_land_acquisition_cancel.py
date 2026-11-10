@@ -18,6 +18,8 @@ from frappe.model.workflow import apply_workflow, get_transitions, get_workflow_
 from frappe.tests.utils import FrappeTestCase
 from frappe.utils import today
 
+from landms.landms.doctype.landms_project_setting.landms_project_setting import copy_of_landms_settings
+
 # The way forward through the approval workflows, in the order users click.
 _FORWARD = ("Submit for Approval", "Submit", "Approve")
 # Records that can carry the project; only those with the field on this site are counted.
@@ -121,6 +123,9 @@ class TestLandAcquisitionCancel(FrappeTestCase):
 				"partner_code": "PART-T" + frappe.generate_hash(length=3).upper(),
 			}
 		).insert()
+		# a project is approved only once its setting record is filled (LA-7)
+		setting = frappe.get_doc("LandMS Project Setting", project.name)
+		setting.update(copy_of_landms_settings(self.company)).save(ignore_permissions=True)
 		return self._submit(project)
 
 	def _supplier_invoice(self, project):

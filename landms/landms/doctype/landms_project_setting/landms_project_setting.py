@@ -20,14 +20,14 @@ from frappe.model import no_value_fields
 from frappe.model.document import Document
 from frappe.utils import get_link_to_form
 
-SETTINGS = "LandMS Project Settings"
+SETTINGS = "LandMS Project Setting"
 # required numbers that mean nothing at 0 (an empty number is stored as 0); the fee amount may be 0
 NOT_ZERO = ("unpaid_application_expiry_days", "application_fee_validity_days", "forfeiture_percentage")
 NUMBERS = ("Int", "Float", "Currency", "Percent")
 OF_COMPANY = ("Account", "Warehouse", "Cost Center")
 
 
-class LandMSProjectSettings(Document):
+class LandMSProjectSetting(Document):
 	def validate(self):
 		self._check_company()
 		self._warn_if_accounts_change_after_postings()
