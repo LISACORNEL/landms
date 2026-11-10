@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import frappe
 from frappe.model.document import Document
+from frappe.query_builder import Order
 from frappe.utils import add_days, cint, escape_html, flt, get_url_to_form, getdate, today
 
 from landms.landms.doctype.land_acquisition.land_acquisition import (
@@ -624,22 +625,19 @@ class PlotContract(Document):
 		return None
 
 	def _get_invoice_payment_entry_events(self, invoice_name):
-		return frappe.db.sql(
-			"""
-			select
-				pe.posting_date,
-				per.allocated_amount as amount,
-				pe.name
-			from `tabPayment Entry` pe
-			inner join `tabPayment Entry Reference` per
-				on per.parent = pe.name
-			where pe.docstatus = 1
-			  and per.reference_doctype = 'Sales Invoice'
-			  and per.reference_name = %s
-			order by pe.posting_date asc, pe.name asc
-			""",
-			(invoice_name,),
-			as_dict=True,
+		pe = frappe.qb.DocType("Payment Entry")
+		per = frappe.qb.DocType("Payment Entry Reference")
+		return (
+			frappe.qb.from_(pe)
+			.inner_join(per)
+			.on(per.parent == pe.name)
+			.select(pe.posting_date, per.allocated_amount.as_("amount"), pe.name)
+			.where(pe.docstatus == 1)
+			.where(per.reference_doctype == "Sales Invoice")
+			.where(per.reference_name == invoice_name)
+			.orderby(pe.posting_date, order=Order.asc)
+			.orderby(pe.name, order=Order.asc)
+			.run(as_dict=True)
 		)
 
 	# ------------------------------------------------------------------ #
@@ -1008,45 +1006,34 @@ def _get_plot_payment_entries(doc):
 	names = set()
 	rows = []
 
-	if doc.sales_order:
-		so_rows = frappe.db.sql(
-			"""
-			select distinct pe.name, pe.posting_date
-			from `tabPayment Entry` pe
-			inner join `tabPayment Entry Reference` per
-				on per.parent = pe.name
-			where pe.docstatus = 1
-			  and per.reference_doctype = 'Sales Order'
-			  and per.reference_name = %s
-			order by pe.posting_date asc, pe.name asc
-			""",
-			(doc.sales_order,),
-			as_dict=True,
-		)
-		for row in so_rows:
-			if row.name not in names:
-				names.add(row.name)
-				rows.append(row)
-
-	if doc.booking_fee_invoice:
-		si_rows = frappe.db.sql(
-			"""
-			select distinct pe.name, pe.posting_date
-			from `tabPayment Entry` pe
-			inner join `tabPayment Entry Reference` per
-				on per.parent = pe.name
-			where pe.docstatus = 1
-			  and per.reference_doctype = 'Sales Invoice'
-			  and per.reference_name = %s
-			order by pe.posting_date asc, pe.name asc
-			""",
-			(doc.booking_fee_invoice,),
-			as_dict=True,
-		)
-		for row in si_rows:
+	for reference_doctype, reference_name in (
+		("Sales Order", doc.sales_order),
+		("Sales Invoice", doc.booking_fee_invoice),
+	):
+		if not reference_name:
+			continue
+		for row in _get_submitted_payment_entries(reference_doctype, reference_name):
 			if row.name not in names:
 				names.add(row.name)
 				rows.append(row)
 
 	rows.sort(key=lambda d: (d.posting_date, d.name))
 	return rows
+
+
+def _get_submitted_payment_entries(reference_doctype, reference_name):
+	pe = frappe.qb.DocType("Payment Entry")
+	per = frappe.qb.DocType("Payment Entry Reference")
+	return (
+		frappe.qb.from_(pe)
+		.inner_join(per)
+		.on(per.parent == pe.name)
+		.select(pe.name, pe.posting_date)
+		.distinct()
+		.where(pe.docstatus == 1)
+		.where(per.reference_doctype == reference_doctype)
+		.where(per.reference_name == reference_name)
+		.orderby(pe.posting_date, order=Order.asc)
+		.orderby(pe.name, order=Order.asc)
+		.run(as_dict=True)
+	)
