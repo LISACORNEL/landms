@@ -285,6 +285,7 @@
    "label": "Plot Type Rates"
   },
   {
+   "allow_on_submit": 1,
    "description": "Selling price per sqm for each plot type on this land acquisition",
    "fieldname": "plot_type_rates",
    "fieldtype": "Table",
