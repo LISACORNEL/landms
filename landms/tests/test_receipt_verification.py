@@ -82,6 +82,7 @@ class TestVerifyReceipt(FrappeTestCase):
 	def setUp(self):
 		self.handover = None
 		self.contract_status = "Completed"
+		self.owed = 0
 		self.logged = []
 		real_get_value = frappe.db.get_value
 
@@ -99,6 +100,7 @@ class TestVerifyReceipt(FrappeTestCase):
 		for p in (
 			patch.object(frappe.db, "get_value", side_effect=get_value),
 			patch("landms.receipt_verification._log", side_effect=lambda *a: self.logged.append(a)),
+			patch("landms.receipt_verification.money_owed", side_effect=lambda contract: self.owed),
 		):
 			p.start()
 			self.addCleanup(p.stop)
@@ -128,6 +130,12 @@ class TestVerifyReceipt(FrappeTestCase):
 		self.assertEqual(receipt["code"], "ABCD-2345-EFGH")
 		self.assertIn("9,685,700", receipt["amount_paid"])
 		self.assertEqual(self.logged[-1][2], "valid")
+
+	def test_a_receipt_with_money_owed_is_cancelled(self):
+		self._submitted()
+		for owed in (100, None):
+			self.owed = owed
+			self.assertEqual(self.check(code="abcd-2345-efgh"), {"valid": False, "status": "cancelled"})
 
 	def test_unknown_code_says_not_found_and_nothing_else(self):
 		out = self.check(code="ZZZZ-ZZZZ-ZZZZ")

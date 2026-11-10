@@ -93,6 +93,32 @@ def on_submit_payment_entry(doc, method=None):
 	_enqueue_plot_payment_sync(doc, "submit")
 
 
+def before_cancel_payment_entry(doc, method=None):
+	"""Refuse to take money off a terminated contract or a handed-over plot."""
+	_refuse_money_removal(_get_related_landms_documents_from_payment_entry(doc)["contracts"])
+
+
+def before_submit_unreconcile_payment(doc, method=None):
+	"""The same refusal when a payment is unlinked from a plot invoice or order."""
+	contracts = set()
+	for row in doc.get("allocations") or []:
+		target = _resolve_landms_plot_reference(
+			row.reference_doctype, row.reference_name, create_missing_invoice=False
+		)
+		if target and target.get("plot_contract"):
+			contracts.add(target["plot_contract"])
+	_refuse_money_removal(contracts)
+
+
+def _refuse_money_removal(contracts):
+	for contract in sorted(contracts):
+		if frappe.db.get_value("Plot Contract", contract, "contract_status") == "Terminated":
+			frappe.throw(f"Contract {contract} is terminated. Its money cannot be cancelled or moved.")
+		handover = frappe.db.get_value("Plot Handover", {"contract": contract, "docstatus": 1}, "name")
+		if handover:
+			frappe.throw(f"Plot handover {handover} is submitted. Cancel the handover first.")
+
+
 def on_cancel_payment_entry(doc, method=None):
 	_cancel_government_share_je(doc)
 	_enqueue_plot_payment_sync(doc, "cancel")
@@ -112,6 +138,8 @@ def _enqueue_plot_payment_sync(doc, event):
 		try:
 			_run_plot_payment_sync(so_name, doc)
 		except Exception:
+			if event == "cancel":
+				raise  # the cancel stops: the contract never falls behind its money
 			frappe.log_error(frappe.get_traceback(), f"plot_pay sync failed for {so_name}")
 
 

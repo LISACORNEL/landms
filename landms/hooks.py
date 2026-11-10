@@ -61,6 +61,7 @@ doc_events = {
 	},
 	"Payment Entry": {
 		"before_validate": "landms.cost_center.apply_landms_cost_center",
+		"before_cancel": "landms.payment_sync.before_cancel_payment_entry",
 		"validate": [
 			"landms.landms.doctype.land_acquisition.land_acquisition.autoset_land_acquisition_on_payment_entry",
 			"landms.payment_sync.validate_payment_entry",
@@ -89,6 +90,7 @@ doc_events = {
 		],
 	},
 	"Unreconcile Payment": {
+		"before_submit": "landms.payment_sync.before_submit_unreconcile_payment",
 		"on_submit": [
 			"landms.malipopay_external.on_unreconcile_payment_submit",
 			"landms.reallocation_sync.on_unreconcile_payment_submit",

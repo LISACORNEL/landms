@@ -21,8 +21,13 @@ class PlotHandover(Document):
 		self._ensure_no_existing_handover()
 
 	def before_submit(self):
-		from landms.receipt_verification import assign_code
+		from landms.receipt_verification import assign_code, money_owed
 
+		owed = money_owed(self.contract)
+		if owed is None or owed > 0:
+			frappe.throw(
+				f"Contract {self.contract} is not fully paid. A plot is handed over only when nothing is owed."
+			)
 		assign_code(self)
 
 	def on_submit(self):

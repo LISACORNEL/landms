@@ -337,6 +337,9 @@ class PlotContract(Document):
 	# ------------------------------------------------------------------ #
 
 	def sync_payment_status(self):
+		# terminate is final: later money changes never reopen it
+		if self.contract_status == "Terminated":
+			return
 		so_doc = self._get_sales_order_doc()
 		if not so_doc:
 			return
@@ -435,6 +438,10 @@ class PlotContract(Document):
 				only_from=("Pending Advance",),
 			):
 				self._sync_land_acquisition_summary()
+
+		elif self.docstatus == 1 and self.contract_status == "Completed":
+			# money removed below the advance: no longer complete
+			self.contract_status = "Ongoing"
 
 		self._persist_payment_sync_state()
 
