@@ -13,22 +13,31 @@ from landms.sales_order_hooks import _post_credit_note_for_outstanding
 
 
 class PlotContract(Document):
+	"""A plot sale's contract, made by its Sales Order and kept in step with the plot invoice.
+
+	The Sales Order creates the draft contract (sales_order_hooks). Every payment or reversal on the
+	plot invoice re-runs sync_payment_status, which copies the money figures and installment rows
+	from the invoice: the contract submits itself once the advance is paid and completes when
+	nothing is owed. Terminate ends it for good.
+	"""
+
 	# ------------------------------------------------------------------ #
 	#  Validate / Submit / Cancel                                          #
 	# ------------------------------------------------------------------ #
 
 	def validate(self):
-		self.validate_plot_available()
+		self._require_sales_order()
 		self.fill_selling_price()
 		self.calculate_financials()
-		self.generate_payment_schedule()
 		self.calculate_payment_summary()
 
 	def before_submit(self):
+		"""Submit only after the first payment on the order, and once the advance is paid."""
 		self._validate_sales_order_first_payment_gate()
 		self._validate_advance_met()
 
 	def before_cancel(self):
+		"""A contract with money paid is terminated, never cancelled."""
 		if flt(self.total_paid) > 0:
 			frappe.throw(
 				f"Contract {self.name} has received payments (TZS {flt(self.total_paid):,.0f}). "
@@ -36,11 +45,13 @@ class PlotContract(Document):
 			)
 
 	def on_submit(self):
+		"""Reserve the plot and start the contract."""
 		set_plot_status(self.plot, "Reserved", f"contract {link('Plot Contract', self.name)} was submitted")
 		self._sync_land_acquisition_summary()
 		self.db_set("contract_status", "Ongoing")
 
 	def on_cancel(self):
+		"""Give the plot back (only an unpaid contract can be cancelled)."""
 		set_plot_status(self.plot, "Available", f"contract {link('Plot Contract', self.name)} was cancelled")
 		self._sync_land_acquisition_summary()
 		self.db_set("contract_status", "Cancelled")
@@ -49,37 +60,12 @@ class PlotContract(Document):
 	#  Validation helpers                                                  #
 	# ------------------------------------------------------------------ #
 
-	def validate_plot_available(self):
-		if not self.plot:
-			return
-		if self.sales_order or self.flags.get("from_sales_order"):
-			return
-		if frappe.db.exists("Plot Contract", self.name):
-			return
-
-		plot_status = frappe.db.get_value("Plot Master", self.plot, "status")
-		if plot_status != "Available":
-			frappe.throw(
-				f"Plot {self.plot} is not Available (current status: {plot_status}). "
-				"Only Available plots can be contracted."
-			)
-		active = frappe.db.exists(
-			"Plot Contract",
-			{
-				"plot": self.plot,
-				"docstatus": 1,
-				"contract_status": ["in", ["Ongoing", "Completed"]],
-			},
-		)
-		if active:
-			frappe.throw(
-				f"Plot {self.plot} already has an active contract ({active}). Terminate or complete it first."
-			)
+	def _require_sales_order(self):
+		"""A contract is made by its Sales Order, never typed in by hand."""
+		if not self.sales_order:
+			frappe.throw("A plot contract is made from its Sales Order.", title="No Sales Order")
 
 	def _validate_sales_order_first_payment_gate(self):
-		if not self.sales_order:
-			return
-
 		if not frappe.db.exists("Sales Order", self.sales_order):
 			frappe.throw(f"Linked Sales Order {self.sales_order} was not found.")
 
@@ -138,6 +124,7 @@ class PlotContract(Document):
 	# ------------------------------------------------------------------ #
 
 	def fill_selling_price(self):
+		"""Price, project and the order's links (control number, application, invoice)."""
 		if not self.plot:
 			return
 
@@ -170,66 +157,18 @@ class PlotContract(Document):
 			self.booking_fee_invoice = so_doc.get("plot_sales_invoice") or self.booking_fee_invoice
 
 	def calculate_financials(self):
+		"""Advance amount, balance and payment deadline from the price and percentages."""
 		if flt(self.selling_price) > 0 and flt(self.booking_fee_percent) > 0:
 			self.booking_fee_amount = flt(self.selling_price) * flt(self.booking_fee_percent) / 100
 			self.balance_due = flt(self.selling_price) - flt(self.booking_fee_amount)
 		if self.contract_date and flt(self.payment_completion_days) > 0:
 			self.payment_deadline = add_days(self.contract_date, int(self.payment_completion_days))
 
-	def generate_payment_schedule(self):
-		"""Only standalone manual contracts generate their own schedule.
-
-		Sales-Order-linked contracts are read-only mirrors of the Sales Order /
-		Sales Invoice schedule and are populated by sales_order_hooks + syncs.
-		"""
-		if self.docstatus == 1:
-			return
-		if self.sales_order or self.flags.get("from_sales_order"):
-			return
-		if not flt(self.selling_price) or not flt(self.booking_fee_percent):
-			return
-		if not self.contract_date:
-			return
-
-		booking_fee = flt(self.booking_fee_amount) or (
-			flt(self.selling_price) * flt(self.booking_fee_percent) / 100
-		)
-		balance = flt(self.selling_price) - booking_fee
-		total_days = int(self.payment_completion_days or 90)
-
-		self.set("payment_schedule", [])
-		self.append(
-			"payment_schedule",
-			{
-				"installment_number": 1,
-				"description": "Advance",
-				"due_date": self.contract_date,
-				"expected_amount": booking_fee,
-				"paid_amount": 0,
-				"outstanding_amount": booking_fee,
-				"paid_date": None,
-				"sales_invoice": "",
-				"status": "Pending",
-			},
-		)
-
-		if balance > 0:
-			self.append(
-				"payment_schedule",
-				{
-					"installment_number": 2,
-					"description": "Balance",
-					"due_date": add_days(self.contract_date, total_days),
-					"expected_amount": balance,
-					"paid_amount": 0,
-					"outstanding_amount": balance,
-					"paid_date": None,
-					"sales_invoice": "",
-					"status": "Pending",
-				},
-			)
-
 	def calculate_payment_summary(self):
+		"""Contract value and government fee from the selling price; totals only before any payment.
+
+		Once money has come in, the totals belong to sync_payment_status (read from the invoice).
+		"""
 		# For SO-linked contracts, payment totals are managed by
 		# sync_payment_status (which reads from the SI). Recalculating
 		# from in-memory schedule rows here would overwrite synced values
@@ -338,6 +277,11 @@ class PlotContract(Document):
 	# ------------------------------------------------------------------ #
 
 	def sync_payment_status(self):
+		"""Copy the money from the plot invoice: totals, installments, paid dates, status.
+
+		Runs after every payment and every reversal. Submits a draft contract once the advance is
+		paid; completes a paid-off contract (revenue journal, handover draft, plot Ready for Handover).
+		"""
 		so_doc = self._get_sales_order_doc()
 		if not so_doc:
 			return
@@ -524,6 +468,7 @@ class PlotContract(Document):
 				target.db_update()
 
 	def _persist_payment_sync_state(self):
+		"""Save the synced figures straight to the database (draft and submitted)."""
 		if self.docstatus == 0:
 			frappe.db.set_value(
 				"Plot Contract",
@@ -578,6 +523,7 @@ class PlotContract(Document):
 		return "Advance" if idx == 1 else f"Installment {idx}"
 
 	def _get_paid_dates_by_installment(self, invoice):
+		"""{installment number: the date the payments first covered it}, oldest payment first."""
 		grand_total = flt(invoice.grand_total)
 		booking_fee_percent = flt(self.booking_fee_percent or 0)
 		advance_amount = (
@@ -645,6 +591,7 @@ class PlotContract(Document):
 	# ------------------------------------------------------------------ #
 
 	def _post_completion_entries(self, settings):
+		"""Revenue recognition journal, once per contract (kept in the field government_fee_entry)."""
 		if self.government_fee_entry:
 			return None
 
@@ -688,6 +635,7 @@ class PlotContract(Document):
 		return je.name
 
 	def _ensure_handover_draft(self):
+		"""One draft Plot Handover per completed contract."""
 		existing = frappe.db.get_value(
 			"Plot Handover",
 			{"contract": self.name, "docstatus": ["!=", 2]},
@@ -715,6 +663,7 @@ class PlotContract(Document):
 		return handover.name
 
 	def _post_termination_journal_entry(self, settings):
+		"""Forfeiture journal: the forfeited share of what was paid, minus the government share already withheld."""
 		if self.forfeiture_entry:
 			return None
 
@@ -775,6 +724,7 @@ class PlotContract(Document):
 
 	@frappe.whitelist()
 	def terminate_contract(self, reason):
+		"""End the contract for good: bank number declined first, then forfeiture, invoice, order, application, plot."""
 		if self.contract_status not in ("Ongoing", "Overdue"):
 			frappe.throw("Only Ongoing or Overdue contracts can be terminated.")
 		if self.docstatus != 1:
@@ -929,6 +879,7 @@ class PlotContract(Document):
 
 @frappe.whitelist()
 def get_linked_documents_summary(plot_contract):
+	"""The contract form's linked-documents panel (HTML)."""
 	if not plot_contract or not frappe.db.exists("Plot Contract", plot_contract):
 		return ""
 
@@ -1003,6 +954,7 @@ def _doc_link(doctype, name):
 
 
 def _get_plot_payment_entries(doc):
+	"""Submitted payments on the contract's order and plot invoice, each once, oldest first."""
 	names = set()
 	rows = []
 
@@ -1022,6 +974,7 @@ def _get_plot_payment_entries(doc):
 
 
 def _get_submitted_payment_entries(reference_doctype, reference_name):
+	"""Submitted Payment Entries with a line against this document, oldest first."""
 	pe = frappe.qb.DocType("Payment Entry")
 	per = frappe.qb.DocType("Payment Entry Reference")
 	return (
