@@ -34,21 +34,21 @@ _PROJECT_TAG = "landms.overrides.project_tag.stamp_project"
 doc_events = {
 	"Purchase Order": {
 		"validate": [
-			"landms.landms.doctype.land_acquisition.land_acquisition.set_land_acquisition_expense_account",
+			"landms.overrides.update_project_costs.set_land_acquisition_expense_account",
 			_PROJECT_TAG,
 		],
-		"on_submit": "landms.landms.doctype.land_acquisition.land_acquisition.sync_costs_from_purchase_order",
-		"on_cancel": "landms.landms.doctype.land_acquisition.land_acquisition.sync_costs_from_purchase_order",
-		"on_update_after_submit": "landms.landms.doctype.land_acquisition.land_acquisition.sync_costs_from_purchase_order",
+		"on_submit": "landms.overrides.update_project_costs.sync_costs_from_purchase_order",
+		"on_cancel": "landms.overrides.update_project_costs.sync_costs_from_purchase_order",
+		"on_update_after_submit": "landms.overrides.update_project_costs.sync_costs_from_purchase_order",
 	},
 	"Purchase Invoice": {
 		"validate": [
-			"landms.landms.doctype.land_acquisition.land_acquisition.set_land_acquisition_expense_account",
+			"landms.overrides.update_project_costs.set_land_acquisition_expense_account",
 			_PROJECT_TAG,
 		],
-		"on_submit": "landms.landms.doctype.land_acquisition.land_acquisition.sync_costs_from_purchase_invoice",
-		"on_cancel": "landms.landms.doctype.land_acquisition.land_acquisition.sync_costs_from_purchase_invoice",
-		"on_update_after_submit": "landms.landms.doctype.land_acquisition.land_acquisition.sync_costs_from_purchase_invoice",
+		"on_submit": "landms.overrides.update_project_costs.sync_costs_from_purchase_invoice",
+		"on_cancel": "landms.overrides.update_project_costs.sync_costs_from_purchase_invoice",
+		"on_update_after_submit": "landms.overrides.update_project_costs.sync_costs_from_purchase_invoice",
 	},
 	# Cost centre: one rule for every LandMS document (landms/cost_center.py) —
 	# fills EMPTY header/line cost centres from LandMS Settings, only on
@@ -64,22 +64,22 @@ doc_events = {
 	"Journal Entry": {
 		"before_validate": "landms.cost_center.apply_landms_cost_center",
 		"validate": _PROJECT_TAG,
-		"on_submit": "landms.landms.doctype.land_acquisition.land_acquisition.sync_costs_from_journal_entry",
-		"on_cancel": "landms.landms.doctype.land_acquisition.land_acquisition.sync_costs_from_journal_entry",
+		"on_submit": "landms.overrides.update_project_costs.sync_costs_from_journal_entry",
+		"on_cancel": "landms.overrides.update_project_costs.sync_costs_from_journal_entry",
 	},
 	"Payment Entry": {
 		"before_validate": "landms.cost_center.apply_landms_cost_center",
 		"validate": [
-			"landms.landms.doctype.land_acquisition.land_acquisition.autoset_land_acquisition_on_payment_entry",
+			"landms.overrides.update_project_costs.autoset_land_acquisition_on_payment_entry",
 			"landms.payment_sync.validate_payment_entry",
 			_PROJECT_TAG,
 		],
 		"on_submit": [
-			"landms.landms.doctype.land_acquisition.land_acquisition.sync_costs_from_payment_entry",
+			"landms.overrides.update_project_costs.sync_costs_from_payment_entry",
 			"landms.payment_sync.on_submit_payment_entry",
 		],
 		"on_cancel": [
-			"landms.landms.doctype.land_acquisition.land_acquisition.sync_costs_from_payment_entry",
+			"landms.overrides.update_project_costs.sync_costs_from_payment_entry",
 			"landms.payment_sync.on_cancel_payment_entry",
 			# Malipopay section 11: a DEBIT may be due; inert unless
 			# Malipopay Settings.external_entries_mode is on, never raises

@@ -98,7 +98,7 @@ frappe.ui.form.on("Land Acquisition", {
           () => {
             frappe.call({
               method:
-                "landms.landms.doctype.land_acquisition.land_acquisition.recalculate_plot_costs",
+                "landms.landms.doctype.land_acquisition.recalculate_plot_costs.recalculate_plot_costs",
               args: { land_acquisition: frm.doc.name },
               callback: () => frm.reload_doc(),
             });
@@ -135,7 +135,7 @@ function _start_recalculation_poll(frm) {
 function refresh_cost_summary(frm) {
   frappe.call({
     method:
-      "landms.landms.doctype.land_acquisition.land_acquisition.refresh_cost_summary",
+      "landms.landms.doctype.land_acquisition.cost_totals.refresh_cost_summary",
     args: { land_acquisition: frm.doc.name },
     callback(r) {
       const summary = r.message || {};
