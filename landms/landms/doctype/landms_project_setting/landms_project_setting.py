@@ -91,7 +91,7 @@ def accounts_for(land_acquisition):
 
 
 def ensure_project_settings(doc, method=None, copy=None):
-	"""Project hook (on_update): every project has its settings record, linked and named after it;
+	"""Called by Land Acquisition.on_update: every project has its settings record, linked and named after it;
 	a draft project's new name is carried over. Created empty for Finance to fill, or, from the
 	patch, as an exact copy of LandMS Settings."""
 	current = frappe.db.get_value(SETTINGS, doc.name, ["name", "project_name"], as_dict=True)
@@ -114,7 +114,7 @@ def ensure_project_settings(doc, method=None, copy=None):
 
 
 def check_project_settings_complete(doc, method=None):
-	"""Project hook (before_submit): refuse while a field marked * is empty."""
+	"""Called by Land Acquisition.before_submit: refuse while a field marked * is empty."""
 	ensure_project_settings(doc)
 	missing = missing_fields(frappe.get_doc(SETTINGS, doc.name))
 	if missing:
@@ -126,6 +126,6 @@ def check_project_settings_complete(doc, method=None):
 
 
 def delete_project_settings(doc, method=None):
-	"""Project hook (on_trash): a deleted project takes its settings record with it."""
+	"""Called by Land Acquisition.on_trash: a deleted project takes its settings record with it."""
 	if frappe.db.exists(SETTINGS, doc.name):
 		frappe.delete_doc(SETTINGS, doc.name, ignore_permissions=True)
