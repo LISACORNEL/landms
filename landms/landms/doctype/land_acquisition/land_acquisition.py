@@ -4,6 +4,11 @@ from frappe.model.document import Document
 from frappe.utils import cint, create_batch, flt, today
 
 from landms.after_submit import drop_rounding_noise_on_locked_fields
+from landms.landms.doctype.landms_project_setting.landms_project_setting import (
+	check_project_settings_complete,
+	delete_project_settings,
+	ensure_project_settings,
+)
 
 
 class LandAcquisition(Document):
@@ -137,11 +142,21 @@ class LandAcquisition(Document):
 			"Malipopay Collection", {"land_acquisition": self.name, "state": ["!=", "Dead"]}
 		)
 
+	def on_update(self):
+		# one setting record per project, created with it and renamed with it
+		ensure_project_settings(self)
+
 	def before_submit(self):
 		if self.status != "Approved":
 			frappe.throw(_("Land Acquisition must be Approved through the workflow before submission."))
 		self.approval_date = today()
 		self.approved_by = frappe.session.user
+		# approval waits for the project's setting record to be complete
+		check_project_settings_complete(self)
+
+	def on_trash(self):
+		# a deleted project takes its setting record with it
+		delete_project_settings(self)
 
 	def on_submit(self):
 		sync_land_acquisition_cost_summary(self.name)
