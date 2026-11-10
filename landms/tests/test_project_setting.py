@@ -143,8 +143,10 @@ class TestProjectSettings(FrappeTestCase):
 		self.assertEqual(record.project_name, project.acquisition_name)
 		self.assertEqual(record.get_title(), project.acquisition_name, "the title is the project's name")
 		self.assertEqual(record.company, self.company)
+		# the system fills the ERPNext Project; Finance fills the rest
+		self.assertTrue(record.erpnext_project)
 		for df in _value_fields(SETTINGS):
-			if df.fieldname not in ("land_acquisition", "project_name", "company"):
+			if df.fieldname not in ("land_acquisition", "project_name", "company", "erpnext_project"):
 				self.assertFalse(record.get(df.fieldname), f"{df.fieldname} should start empty")
 
 	def test_one_record_per_project(self):

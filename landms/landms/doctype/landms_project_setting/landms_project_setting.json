@@ -46,6 +46,15 @@
    "reqd": 1
   },
   {
+   "description": "Made with the project; every posting of the project carries it.",
+   "fieldname": "erpnext_project",
+   "fieldtype": "Link",
+   "label": "ERPNext Project",
+   "no_copy": 1,
+   "options": "Project",
+   "read_only": 1
+  },
+  {
    "fieldname": "default_currency",
    "fieldtype": "Link",
    "label": "Currency",

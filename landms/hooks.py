@@ -28,15 +28,24 @@ after_migrate = [
 	"landms.patches.property_setter.create_property_setters.execute",
 ]
 
+# the project's ERPNext Project, stamped beside the Land Acquisition tag
+_PROJECT_TAG = "landms.overrides.project_tag.stamp_project"
+
 doc_events = {
 	"Purchase Order": {
-		"validate": "landms.landms.doctype.land_acquisition.land_acquisition.set_land_acquisition_expense_account",
+		"validate": [
+			"landms.landms.doctype.land_acquisition.land_acquisition.set_land_acquisition_expense_account",
+			_PROJECT_TAG,
+		],
 		"on_submit": "landms.landms.doctype.land_acquisition.land_acquisition.sync_costs_from_purchase_order",
 		"on_cancel": "landms.landms.doctype.land_acquisition.land_acquisition.sync_costs_from_purchase_order",
 		"on_update_after_submit": "landms.landms.doctype.land_acquisition.land_acquisition.sync_costs_from_purchase_order",
 	},
 	"Purchase Invoice": {
-		"validate": "landms.landms.doctype.land_acquisition.land_acquisition.set_land_acquisition_expense_account",
+		"validate": [
+			"landms.landms.doctype.land_acquisition.land_acquisition.set_land_acquisition_expense_account",
+			_PROJECT_TAG,
+		],
 		"on_submit": "landms.landms.doctype.land_acquisition.land_acquisition.sync_costs_from_purchase_invoice",
 		"on_cancel": "landms.landms.doctype.land_acquisition.land_acquisition.sync_costs_from_purchase_invoice",
 		"on_update_after_submit": "landms.landms.doctype.land_acquisition.land_acquisition.sync_costs_from_purchase_invoice",
@@ -47,9 +56,14 @@ doc_events = {
 	# before_validate runs on every save path and ahead of the mandatory check.
 	"Delivery Note": {
 		"before_validate": "landms.cost_center.apply_landms_cost_center",
+		"validate": _PROJECT_TAG,
+	},
+	"Stock Entry": {
+		"validate": _PROJECT_TAG,
 	},
 	"Journal Entry": {
 		"before_validate": "landms.cost_center.apply_landms_cost_center",
+		"validate": _PROJECT_TAG,
 		"on_submit": "landms.landms.doctype.land_acquisition.land_acquisition.sync_costs_from_journal_entry",
 		"on_cancel": "landms.landms.doctype.land_acquisition.land_acquisition.sync_costs_from_journal_entry",
 	},
@@ -58,6 +72,7 @@ doc_events = {
 		"validate": [
 			"landms.landms.doctype.land_acquisition.land_acquisition.autoset_land_acquisition_on_payment_entry",
 			"landms.payment_sync.validate_payment_entry",
+			_PROJECT_TAG,
 		],
 		"on_submit": [
 			"landms.landms.doctype.land_acquisition.land_acquisition.sync_costs_from_payment_entry",
@@ -90,11 +105,12 @@ doc_events = {
 	},
 	"Sales Invoice": {
 		"before_validate": "landms.cost_center.apply_landms_cost_center",
+		"validate": _PROJECT_TAG,
 		"before_save": "landms.sales_invoice_hooks.before_save_sales_invoice",
 	},
 	"Sales Order": {
 		"before_validate": "landms.cost_center.apply_landms_cost_center",
-		"validate": "landms.sales_order_hooks.validate_sales_order",
+		"validate": ["landms.sales_order_hooks.validate_sales_order", _PROJECT_TAG],
 		"before_submit": "landms.sales_order_hooks.before_submit_sales_order",
 		"on_submit": [
 			"landms.sales_order_hooks.submit_sales_order",

@@ -20,6 +20,11 @@ from frappe.model import no_value_fields
 from frappe.model.document import Document
 from frappe.utils import get_link_to_form
 
+from landms.landms.doctype.landms_project_setting.erpnext_project import (
+	delete_erpnext_project,
+	ensure_erpnext_project,
+)
+
 SETTINGS = "LandMS Project Setting"
 # required numbers that mean nothing at 0 (an empty number is stored as 0); the fee amount may be 0
 NOT_ZERO = ("unpaid_application_expiry_days", "application_fee_validity_days", "forfeiture_percentage")
@@ -31,6 +36,14 @@ class LandMSProjectSetting(Document):
 	def validate(self):
 		self._check_company()
 		self._warn_if_accounts_change_after_postings()
+
+	def on_update(self):
+		# keep the project's ERPNext Project in step
+		ensure_erpnext_project(self)
+
+	def after_delete(self):
+		# its ERPNext Project goes with it
+		delete_erpnext_project(self)
 
 	def _check_company(self):
 		"""Every account, warehouse and cost centre must belong to the project's company."""
@@ -94,10 +107,15 @@ def ensure_project_settings(doc, method=None, copy=None):
 	"""Called by Land Acquisition.on_update: every project has its settings record, linked and named after it;
 	a draft project's new name is carried over. Created empty for Finance to fill, or, from the
 	patch, as an exact copy of LandMS Settings."""
-	current = frappe.db.get_value(SETTINGS, doc.name, ["name", "project_name"], as_dict=True)
+	current = frappe.db.get_value(
+		SETTINGS, doc.name, ["name", "project_name", "erpnext_project"], as_dict=True
+	)
 	if current:
-		if current.project_name != doc.acquisition_name:
+		renamed = current.project_name != doc.acquisition_name
+		if renamed:
 			frappe.db.set_value(SETTINGS, doc.name, "project_name", doc.acquisition_name)
+		if renamed or not current.erpnext_project:
+			ensure_erpnext_project(frappe.get_doc(SETTINGS, doc.name), doc)
 		return
 	record = frappe.get_doc(
 		{
