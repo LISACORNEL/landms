@@ -9,3 +9,4 @@ landms.patches.backfill_payment_channel
 landms.patches.backfill_collect_via_tcb
 landms.patches.backfill_receipt_verification_codes
 landms.patches.create_project_settings
+landms.patches.create_erpnext_projects

@@ -4,6 +4,7 @@ from frappe.model.document import Document
 from frappe.utils import cint, create_batch, flt, today
 
 from landms.after_submit import drop_rounding_noise_on_locked_fields
+from landms.landms.doctype.landms_project_setting.erpnext_project import cancel_erpnext_project
 from landms.landms.doctype.landms_project_setting.landms_project_setting import (
 	check_project_settings_complete,
 	delete_project_settings,
@@ -192,6 +193,8 @@ class LandAcquisition(Document):
 		self.db_set("status", "Cancelled")
 		sync_land_acquisition_cost_summary(self.name)
 		sync_land_acquisition_plot_summary(self.name)
+		# its ERPNext Project is cancelled too
+		cancel_erpnext_project(self)
 
 	# ── Private validators ───────────────────────────────────────────────────
 
