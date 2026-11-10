@@ -125,7 +125,18 @@ def landms_receipt_verification(doc):
 # ---------------------------------------------------------------------------
 
 
-def judge(handover, contract_status):
+def money_owed(contract):
+	"""What the contract's plot invoice still owes; None when there is no submitted invoice."""
+	order, invoice = frappe.db.get_value(
+		"Plot Contract", contract, ["sales_order", "booking_fee_invoice"]
+	) or (None, None)
+	invoice = (order and frappe.db.get_value("Sales Order", order, "plot_sales_invoice")) or invoice
+	if not invoice or frappe.db.get_value("Sales Invoice", invoice, "docstatus") != 1:
+		return None
+	return flt(frappe.db.get_value("Sales Invoice", invoice, "outstanding_amount"))
+
+
+def judge(handover, contract_status, owed=0):
 	"""(status, reason): status is valid / cancelled / not_found and goes to
 	the caller; the reason is for our log only.
 
@@ -138,6 +149,8 @@ def judge(handover, contract_status):
 		return "cancelled", "handover cancelled"
 	if contract_status != "Completed":
 		return "cancelled", f"contract is {contract_status or 'missing'}, not Completed"
+	if owed is None or owed > 0:
+		return "cancelled", "the plot invoice is not fully paid"
 	return "valid", "valid"
 
 
@@ -171,7 +184,8 @@ def verify_receipt(code=None):
 		if handover and handover.contract
 		else None
 	)
-	status, reason = judge(handover, contract_status)
+	owed = money_owed(handover.contract) if handover and handover.contract else None
+	status, reason = judge(handover, contract_status, owed)
 	_log(entered, handover, status, reason)
 	if status != "valid":
 		return {"valid": False, "status": status}
