@@ -6,6 +6,8 @@ them (landms/overrides/update_project_costs.py). Moved unchanged from land_acqui
 """
 
 import frappe
+from frappe.query_builder import DocType, Order
+from frappe.query_builder.functions import Abs, Coalesce, Sum
 from frappe.utils import flt
 
 
@@ -139,24 +141,25 @@ def _fetch_committed(la_name):
 	"""Submitted Purchase Order items tagged to this Land Acquisition."""
 	if not frappe.db.has_column("Purchase Order Item", "land_acquisition"):
 		return []
-	return frappe.db.sql(
-		"""
-        SELECT
-            po.name             AS po,
-            po.supplier         AS supplier,
-            po.transaction_date AS date,
-            po.status           AS status,
-            SUM(poi.base_net_amount) AS amount
-        FROM `tabPurchase Order Item` poi
-        INNER JOIN `tabPurchase Order` po ON po.name = poi.parent
-        WHERE poi.land_acquisition = %(la)s
-          AND po.docstatus = 1
-        GROUP BY po.name
-        HAVING ABS(SUM(poi.base_net_amount)) > 0.0001
-        ORDER BY po.transaction_date DESC, po.creation DESC
-        """,
-		{"la": la_name},
-		as_dict=True,
+	poi, po = DocType("Purchase Order Item"), DocType("Purchase Order")
+	amount = Sum(poi.base_net_amount)
+	return (
+		frappe.qb.from_(poi)
+		.join(po)
+		.on(po.name == poi.parent)
+		.select(
+			po.name.as_("po"),
+			po.supplier.as_("supplier"),
+			po.transaction_date.as_("date"),
+			po.status.as_("status"),
+			amount.as_("amount"),
+		)
+		.where((poi.land_acquisition == la_name) & (po.docstatus == 1))
+		.groupby(po.name)
+		.having(Abs(amount) > 0.0001)
+		.orderby(po.transaction_date, order=Order.desc)
+		.orderby(po.creation, order=Order.desc)
+		.run(as_dict=True)
 	)
 
 
@@ -166,26 +169,43 @@ def _fetch_billed(la_name, lud_account):
 		return []
 	if not lud_account:
 		return []
-	return frappe.db.sql(
-		"""
-        SELECT
-            pi.name           AS pi,
-            pi.supplier       AS supplier,
-            pi.posting_date   AS date,
-            pi.status         AS status,
-            SUM(pii.base_net_amount) AS amount
-        FROM `tabPurchase Invoice Item` pii
-        INNER JOIN `tabPurchase Invoice` pi ON pi.name = pii.parent
-        WHERE pii.land_acquisition = %(la)s
-          AND pi.docstatus = 1
-          AND pii.expense_account = %(lud)s
-        GROUP BY pi.name
-        HAVING ABS(SUM(pii.base_net_amount)) > 0.0001
-        ORDER BY pi.posting_date DESC, pi.creation DESC
-        """,
-		{"la": la_name, "lud": lud_account},
-		as_dict=True,
+	pii, pi = DocType("Purchase Invoice Item"), DocType("Purchase Invoice")
+	amount = Sum(pii.base_net_amount)
+	return (
+		frappe.qb.from_(pii)
+		.join(pi)
+		.on(pi.name == pii.parent)
+		.select(
+			pi.name.as_("pi"),
+			pi.supplier.as_("supplier"),
+			pi.posting_date.as_("date"),
+			pi.status.as_("status"),
+			amount.as_("amount"),
+		)
+		.where((pii.land_acquisition == la_name) & (pi.docstatus == 1) & (pii.expense_account == lud_account))
+		.groupby(pi.name)
+		.having(Abs(amount) > 0.0001)
+		.orderby(pi.posting_date, order=Order.desc)
+		.orderby(pi.creation, order=Order.desc)
+		.run(as_dict=True)
 	)
+
+
+def _land_journal_lines(la_name, accounts):
+	"""Submitted journal lines tagged to this LA that debit one of the land cost accounts."""
+	jea, je = DocType("Journal Entry Account"), DocType("Journal Entry")
+	query = (
+		frappe.qb.from_(jea)
+		.join(je)
+		.on(je.name == jea.parent)
+		.where(
+			(jea.land_acquisition == la_name)
+			& (je.docstatus == 1)
+			& jea.account.isin(accounts)
+			& (jea.debit_in_account_currency > 0)
+		)
+	)
+	return query, jea, je
 
 
 def _fetch_je_rows(la_name, lud_account, plot_inv_account):
@@ -193,23 +213,17 @@ def _fetch_je_rows(la_name, lud_account, plot_inv_account):
 	accounts = tuple(a for a in [lud_account, plot_inv_account] if a)
 	if not accounts:
 		return []
-	return frappe.db.sql(
-		"""
-        SELECT
-            je.name          AS je_name,
-            je.posting_date,
-            je.user_remark,
-            jea.debit_in_account_currency AS amount
-        FROM `tabJournal Entry Account` jea
-        INNER JOIN `tabJournal Entry` je ON je.name = jea.parent
-        WHERE jea.land_acquisition = %(la)s
-          AND je.docstatus = 1
-          AND jea.account IN %(accounts)s
-          AND jea.debit_in_account_currency > 0
-        ORDER BY je.posting_date DESC, je.name
-    """,
-		{"la": la_name, "accounts": accounts},
-		as_dict=True,
+	query, jea, je = _land_journal_lines(la_name, accounts)
+	return (
+		query.select(
+			je.name.as_("je_name"),
+			je.posting_date,
+			je.user_remark,
+			jea.debit_in_account_currency.as_("amount"),
+		)
+		.orderby(je.posting_date, order=Order.desc)
+		.orderby(je.name)
+		.run(as_dict=True)
 	)
 
 
@@ -218,18 +232,8 @@ def _fetch_billed_from_je(la_name, lud_account, plot_inv_account):
 	accounts = tuple(a for a in [lud_account, plot_inv_account] if a)
 	if not accounts:
 		return 0.0
-	result = frappe.db.sql(
-		"""
-        SELECT COALESCE(SUM(jea.debit_in_account_currency), 0)
-        FROM `tabJournal Entry Account` jea
-        INNER JOIN `tabJournal Entry` je ON je.name = jea.parent
-        WHERE jea.land_acquisition = %(la)s
-          AND je.docstatus = 1
-          AND jea.account IN %(accounts)s
-          AND jea.debit_in_account_currency > 0
-    """,
-		{"la": la_name, "accounts": accounts},
-	)
+	query, jea, _je = _land_journal_lines(la_name, accounts)
+	result = query.select(Coalesce(Sum(jea.debit_in_account_currency), 0)).run()
 	return flt(result[0][0]) if result else 0.0
 
 
@@ -240,24 +244,27 @@ def _fetch_paid(pi_names):
 	"""
 	if not pi_names:
 		return [], {}
-	rows = frappe.db.sql(
-		"""
-        SELECT
-            pe.name            AS pe,
-            pe.party           AS supplier,
-            pe.posting_date    AS date,
-            per.reference_name AS pi,
-            SUM(per.allocated_amount) AS amount
-        FROM `tabPayment Entry Reference` per
-        INNER JOIN `tabPayment Entry` pe ON pe.name = per.parent
-        WHERE per.reference_doctype = 'Purchase Invoice'
-          AND per.reference_name IN %(pis)s
-          AND pe.docstatus = 1
-        GROUP BY pe.name, per.reference_name
-        ORDER BY pe.posting_date DESC, pe.creation DESC
-        """,
-		{"pis": tuple(pi_names)},
-		as_dict=True,
+	per, pe = DocType("Payment Entry Reference"), DocType("Payment Entry")
+	rows = (
+		frappe.qb.from_(per)
+		.join(pe)
+		.on(pe.name == per.parent)
+		.select(
+			pe.name.as_("pe"),
+			pe.party.as_("supplier"),
+			pe.posting_date.as_("date"),
+			per.reference_name.as_("pi"),
+			Sum(per.allocated_amount).as_("amount"),
+		)
+		.where(
+			(per.reference_doctype == "Purchase Invoice")
+			& per.reference_name.isin(tuple(pi_names))
+			& (pe.docstatus == 1)
+		)
+		.groupby(pe.name, per.reference_name)
+		.orderby(pe.posting_date, order=Order.desc)
+		.orderby(pe.creation, order=Order.desc)
+		.run(as_dict=True)
 	)
 	paid_per_pi = {}
 	for r in rows:
@@ -275,44 +282,50 @@ def _fetch_paid_advance(la_name):
 	"""
 	if not frappe.db.has_column("Purchase Order Item", "land_acquisition"):
 		return []
-	rows = frappe.db.sql(
-		"""
-        SELECT
-            pe.name             AS pe,
-            pe.party            AS supplier,
-            pe.posting_date     AS date,
-            per.reference_name  AS po,
-            per.allocated_amount AS allocated,
-            (
-                SELECT SUM(poi.base_net_amount)
-                FROM `tabPurchase Order Item` poi
-                WHERE poi.parent = per.reference_name
-                  AND poi.land_acquisition = %(la)s
-            ) AS la_share,
-            (
-                SELECT SUM(poi.base_net_amount)
-                FROM `tabPurchase Order Item` poi
-                WHERE poi.parent = per.reference_name
-            ) AS po_total
-        FROM `tabPayment Entry Reference` per
-        INNER JOIN `tabPayment Entry` pe ON pe.name = per.parent
-        WHERE per.reference_doctype = 'Purchase Order'
-          AND pe.docstatus = 1
-          AND EXISTS (
-              SELECT 1 FROM `tabPurchase Order Item` poi
-              WHERE poi.parent = per.reference_name
-                AND poi.land_acquisition = %(la)s
-          )
-        ORDER BY pe.posting_date DESC, pe.creation DESC
-        """,
-		{"la": la_name},
-		as_dict=True,
+	poi = DocType("Purchase Order Item")
+	# this LA's share of each of its purchase orders, and each order's total
+	la_share = dict(
+		frappe.qb.from_(poi)
+		.select(poi.parent, Sum(poi.base_net_amount))
+		.where(poi.land_acquisition == la_name)
+		.groupby(poi.parent)
+		.run()
+	)
+	if not la_share:
+		return []
+	po_total = dict(
+		frappe.qb.from_(poi)
+		.select(poi.parent, Sum(poi.base_net_amount))
+		.where(poi.parent.isin(tuple(la_share)))
+		.groupby(poi.parent)
+		.run()
+	)
+	per, pe = DocType("Payment Entry Reference"), DocType("Payment Entry")
+	rows = (
+		frappe.qb.from_(per)
+		.join(pe)
+		.on(pe.name == per.parent)
+		.select(
+			pe.name.as_("pe"),
+			pe.party.as_("supplier"),
+			pe.posting_date.as_("date"),
+			per.reference_name.as_("po"),
+			per.allocated_amount.as_("allocated"),
+		)
+		.where(
+			(per.reference_doctype == "Purchase Order")
+			& (pe.docstatus == 1)
+			& per.reference_name.isin(tuple(la_share))
+		)
+		.orderby(pe.posting_date, order=Order.desc)
+		.orderby(pe.creation, order=Order.desc)
+		.run(as_dict=True)
 	)
 
 	result = []
 	for r in rows:
-		po_total = flt(r["po_total"])
-		ratio = (flt(r["la_share"]) / po_total) if po_total else 0.0
+		total = flt(po_total.get(r["po"]))
+		ratio = (flt(la_share.get(r["po"])) / total) if total else 0.0
 		amount = flt(r["allocated"]) * ratio
 		if abs(amount) <= 0.0001:
 			continue
