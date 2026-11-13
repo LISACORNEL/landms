@@ -12,7 +12,10 @@ After the SI exists, all later payments are normalized directly onto it.
 
 from __future__ import annotations
 
+import time
+
 import frappe
+from frappe.query_builder import Order
 from frappe.utils import cstr, flt, today
 
 from landms.elevation import become_administrator, restore_caller
@@ -329,6 +332,9 @@ class ConcurrentPaymentError(frappe.ValidationError):
 # How many times a rail's payment is tried when another payment on the same
 # order is being recorded at the same moment.
 CONCURRENT_ATTEMPTS = 3
+# Three waits of 30 s stay inside the web server's 120 s limit for a TCB notice.
+PAYMENT_LOCK_WAIT_SECONDS = 30
+PAYMENT_LOCK_RETRY_SECONDS = 0.2
 
 
 def record_payment_waiting_for_others(**kwargs):
@@ -354,30 +360,19 @@ def record_payment_waiting_for_others(**kwargs):
 
 
 def _lock_sales_order_for_payment(sales_order_name):
-	"""Hold this order's payment lock until the caller's transaction ends.
-
-	A MySQL named lock: a second payment on the same order waits here (up to 30
-	seconds) until the first one's transaction is committed or rolled back,
-	which releases it (after_commit / after_rollback), as does the connection
-	closing. Nothing between taking the lock and the end of the Payment Entry's
-	submit commits, so the whole payment is covered."""
-	lock_name = f"plot_pay:{sales_order_name}"[:64]
-	# 30 s per wait: three waits stay inside the web server's 120 s limit for a TCB notice
-	row = frappe.db.sql("SELECT GET_LOCK(%s, %s)", (lock_name, 30))
-	if not row or row[0][0] != 1:
-		raise ConcurrentPaymentError(
-			f"Another payment on Sales Order {sales_order_name} is still being recorded. "
-			"This payment was not saved and will be tried again."
-		)
-
-	def release():
+	"""Hold the order's row until this transaction ends; a second payment on the order waits here."""
+	deadline = time.monotonic() + PAYMENT_LOCK_WAIT_SECONDS
+	while True:
 		try:
-			frappe.db.sql("SELECT RELEASE_LOCK(%s)", (lock_name,))
-		except Exception:
-			pass
-
-	frappe.db.after_commit.add(release)
-	frappe.db.after_rollback.add(release)
+			frappe.db.get_value("Sales Order", sales_order_name, "name", for_update=True, wait=False)
+			return
+		except frappe.QueryTimeoutError:
+			if time.monotonic() >= deadline:
+				raise ConcurrentPaymentError(
+					f"Another payment on Sales Order {sales_order_name} is still being recorded. "
+					"This payment was not saved and will be tried again."
+				) from None
+			time.sleep(PAYMENT_LOCK_RETRY_SECONDS)
 
 
 def _refuse_if_read_before_another_payment(doctype, name, fieldname, value_read):
@@ -386,8 +381,7 @@ def _refuse_if_read_before_another_payment(doctype, name, fieldname, value_read)
 	transaction began, so waiting on the lock alone is not enough: the
 	locking read sees the latest saved value, and if it differs, every figure
 	this payment would be built on is out of date."""
-	row = frappe.db.sql(f"SELECT `{fieldname}` FROM `tab{doctype}` WHERE name = %s FOR UPDATE", (name,))
-	current = row[0][0] if row else None
+	current = frappe.db.get_value(doctype, name, fieldname, for_update=True)
 	changed = (
 		abs(flt(current) - flt(value_read)) >= 0.005
 		if fieldname == "outstanding_amount"
@@ -767,20 +761,19 @@ def _get_plot_invoice_name_from_sales_order(sales_order_name: str) -> str:
 	if invoice_name and frappe.db.exists("Sales Invoice", invoice_name):
 		return invoice_name
 
-	result = frappe.db.sql(
-		"""
-		select si.name
-		from `tabSales Invoice` si
-		inner join `tabSales Invoice Item` sii on sii.parent = si.name
-		where si.docstatus != 2
-		  and si.is_return = 0
-		  and ifnull(si.is_plot_sale_invoice, 0) = 1
-		  and sii.sales_order = %s
-		order by si.modified desc
-		limit 1
-		""",
-		(sales_order_name,),
-		as_dict=True,
+	si, item = frappe.qb.DocType("Sales Invoice"), frappe.qb.DocType("Sales Invoice Item")
+	result = (
+		frappe.qb.from_(si)
+		.inner_join(item)
+		.on(item.parent == si.name)
+		.select(si.name)
+		.where(si.docstatus != 2)
+		.where(si.is_return == 0)
+		.where(si.is_plot_sale_invoice == 1)
+		.where(item.sales_order == sales_order_name)
+		.orderby(si.modified, order=Order.desc)
+		.limit(1)
+		.run(as_dict=True)
 	)
 	return result[0].name if result else ""
 
@@ -794,35 +787,29 @@ def _get_sales_order_name_from_plot_invoice(invoice_name: str) -> str:
 	if sales_order_name:
 		return sales_order_name
 
-	result = frappe.db.sql(
-		"""
-		select sii.sales_order
-		from `tabSales Invoice Item` sii
-		where sii.parent = %s
-		  and ifnull(sii.sales_order, '') != ''
-		order by sii.idx asc
-		limit 1
-		""",
-		(invoice_name,),
-		as_dict=True,
+	orders = frappe.get_all(
+		"Sales Invoice Item",
+		filters={"parent": invoice_name, "sales_order": ["is", "set"]},
+		pluck="sales_order",
+		order_by="idx asc",
+		limit=1,
 	)
-	return result[0].sales_order if result else ""
+	return orders[0] if orders else ""
 
 
 def _payment_reference_exists(invoice_name: str, reference_no: str) -> bool:
-	rows = frappe.db.sql(
-		"""
-		select pe.name
-		from `tabPayment Entry` pe
-		inner join `tabPayment Entry Reference` per
-			on per.parent = pe.name
-		where pe.docstatus = 1
-		  and pe.reference_no = %s
-		  and per.reference_doctype = 'Sales Invoice'
-		  and per.reference_name = %s
-		limit 1
-		""",
-		(reference_no, invoice_name),
+	pe, ref = frappe.qb.DocType("Payment Entry"), frappe.qb.DocType("Payment Entry Reference")
+	rows = (
+		frappe.qb.from_(pe)
+		.inner_join(ref)
+		.on(ref.parent == pe.name)
+		.select(pe.name)
+		.where(pe.docstatus == 1)
+		.where(pe.reference_no == reference_no)
+		.where(ref.reference_doctype == "Sales Invoice")
+		.where(ref.reference_name == invoice_name)
+		.limit(1)
+		.run()
 	)
 	return bool(rows)
 
