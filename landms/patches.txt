@@ -7,4 +7,5 @@ landms.patches.recalculate_la_costs_include_je
 landms.patches.backfill_payment_channel
 landms.patches.backfill_collect_via_tcb
 landms.patches.backfill_receipt_verification_codes
+landms.patches.backfill_stock_entry_plot
 landms.patches.create_project_settings

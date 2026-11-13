@@ -1,0 +1,15 @@
+[
+    {
+        "name": "Stock Entry-plot",
+        "dt": "Stock Entry",
+        "label": "Plot",
+        "fieldname": "plot",
+        "insert_after": "remarks",
+        "fieldtype": "Link",
+        "options": "Plot Master",
+        "read_only": 1,
+        "no_copy": 1,
+        "search_index": 1,
+        "doctype": "Custom Field"
+    }
+]
