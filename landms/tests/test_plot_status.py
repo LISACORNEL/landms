@@ -16,6 +16,7 @@ from unittest.mock import patch
 import frappe
 from frappe.tests.utils import FrappeTestCase
 
+from landms.landms.doctype.plot_master import plot_status
 from landms.landms.doctype.plot_master.plot_status import ALLOWED_INTO, STATUSES, link, set_plot_status
 
 # The 14 moves the app made before PM-1: (from, to) as each caller allowed them.
@@ -127,6 +128,40 @@ class TestPlotStatus(FrappeTestCase):
 		before = len(self._notes())
 		self.assertTrue(set_plot_status(self.plot, "Reserved", "the test saved it again"))
 		self.assertEqual(len(self._notes()), before)
+
+	def _listen(self):
+		"""Stand in for another app that follows plots; returns what it was told."""
+		told = []
+		listener = patch.object(
+			plot_status, "_listeners", return_value=[lambda **change: told.append(change)]
+		)
+		listener.start()
+		self.addCleanup(listener.stop)
+		return told
+
+	def test_a_status_change_tells_the_apps_that_follow_plots(self):
+		self._put("Available")
+		told = self._listen()
+		set_plot_status(self.plot, "Pending Fee", "the test submitted an application")
+		self.assertEqual(told, [{"plot": self.plot, "from_status": "Available", "to_status": "Pending Fee"}])
+
+	def test_nothing_is_told_when_the_status_does_not_change(self):
+		self._put("Reserved")
+		told = self._listen()
+		set_plot_status(self.plot, "Reserved", "the test saved it again")
+		set_plot_status(
+			self.plot, "Pending Fee", "the caller wanted Available only", only_from=("Available",)
+		)
+		with self.assertRaises(frappe.ValidationError):
+			set_plot_status(self.plot, "Pending Fee", "a move the rulebook refuses")
+		self.assertEqual(told, [])
+
+	def test_the_followers_are_the_functions_listed_under_the_hook(self):
+		with patch.object(frappe, "get_hooks", return_value=["frappe.utils.cint"]) as hooks:
+			self.assertEqual(plot_status._listeners(), [frappe.utils.cint])
+		hooks.assert_called_once_with("plot_status_changed")
+		# LandMS itself follows nothing: the hook is for other apps
+		self.assertEqual(frappe.get_hooks("plot_status_changed", app_name="landms"), [])
 
 	def test_a_plot_that_does_not_exist_is_ignored_quietly(self):
 		self.assertFalse(set_plot_status("NO-SUCH-PLOT", "Available", "the test"))

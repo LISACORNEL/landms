@@ -69,7 +69,14 @@ def set_plot_status(plot, to_status, because, *, only_from=None, update_modified
 	frappe.clear_document_cache("Plot Master", plot)
 	if current != to_status:
 		_note_on_timeline(plot, current, to_status, because)
+		for listener in _listeners():
+			listener(plot=plot, from_status=current, to_status=to_status)
 	return True
+
+
+def _listeners():
+	"""Functions other apps list under the hook plot_status_changed, to follow a plot's status."""
+	return [frappe.get_attr(path) for path in frappe.get_hooks("plot_status_changed")]
 
 
 def link(doctype, name):
