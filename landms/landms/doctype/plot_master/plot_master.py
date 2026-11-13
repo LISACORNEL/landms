@@ -268,6 +268,7 @@ class PlotMaster(Document):
 				target_warehouse=warehouse,
 				serial_number=serial_number,
 				difference_account=land_account,
+				plot=self.name,
 			)
 		)
 		se.insert(ignore_permissions=True)
@@ -361,6 +362,7 @@ def _build_plot_stock_entry_doc(
 	target_warehouse: str,
 	serial_number: str,
 	difference_account: str,
+	plot: str,
 ) -> dict:
 	"""Build the Stock Entry payload used when a plot enters inventory.
 
@@ -375,6 +377,8 @@ def _build_plot_stock_entry_doc(
 		"company": company,
 		"remarks": f"Plot {plot_number} from {land_acquisition}",
 		"land_acquisition": land_acquisition,
+		# the receipt points back at its plot; the plot shows it under Connections
+		"plot": plot,
 		"difference_account": difference_account,
 		"items": [
 			{

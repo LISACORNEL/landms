@@ -14,6 +14,7 @@ class TestPlotMasterStockEntryAccounts(FrappeTestCase):
 			target_warehouse="Plot Inventory Warehouse - LA",
 			serial_number="PLT-TEST-0001",
 			difference_account="1411 - Land Under Development - LA",
+			plot="PLT-TEST-0001",
 		)
 
 		self.assertEqual(doc["difference_account"], "1411 - Land Under Development - LA")
