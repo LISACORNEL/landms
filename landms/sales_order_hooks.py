@@ -23,6 +23,7 @@ import frappe
 from frappe.utils import add_days, cint, cstr, flt, getdate, today
 
 from landms.elevation import become_administrator, restore_caller
+from landms.landms.doctype.plot_application.application_status import set_application_status
 from landms.landms.doctype.plot_master.plot_master import get_plot_item_code
 from landms.landms.doctype.plot_master.plot_status import link, set_plot_status
 
@@ -587,9 +588,8 @@ def reopen_sales_order(sales_order_name: str):
 		frappe.db.set_value("Sales Order", SO, "plot_sales_invoice", PLOT_SI, update_modified=False)
 	frappe.db.set_value("Plot Application", PA, "sales_order", SO, update_modified=False)
 	frappe.db.set_value("Sales Order", SO, "status", "To Deliver and Bill", update_modified=False)
-	frappe.db.set_value(
-		"Plot Application", PA, {"docstatus": 1, "status": "Paid", "sales_order": SO}, update_modified=False
-	)
+	frappe.db.set_value("Plot Application", PA, {"docstatus": 1, "sales_order": SO}, update_modified=False)
+	set_application_status(PA, "Paid", "order reopened", update_modified=False)
 	set_plot_status(
 		PLOT,
 		"Pending Advance",

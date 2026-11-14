@@ -7,6 +7,7 @@ from frappe.utils import add_days, cint, escape_html, flt, get_url_to_form, getd
 from landms.landms.doctype.land_acquisition.land_acquisition import (
 	sync_land_acquisition_plot_summary,
 )
+from landms.landms.doctype.plot_application.application_status import set_application_status
 from landms.landms.doctype.plot_master.plot_status import link, set_plot_status
 from landms.sales_order_hooks import _post_credit_note_for_outstanding
 
@@ -381,17 +382,8 @@ class PlotContract(Document):
 			except frappe.TimestampMismatchError:
 				pass
 
-		if so_doc.get("plot_application"):
-			app_status = frappe.db.get_value("Plot Application", so_doc.plot_application, "status")
-			if advance_met and app_status == "Paid":
-				frappe.db.set_value(
-					"Plot Application",
-					so_doc.plot_application,
-					"status",
-					"Converted",
-					update_modified=True,
-				)
-				frappe.clear_document_cache("Plot Application", so_doc.plot_application)
+		if so_doc.get("plot_application") and advance_met:
+			set_application_status(so_doc.plot_application, "Converted", "advance paid", only_from=("Paid",))
 
 		if total_outstanding <= 0 and self.docstatus == 1:
 			self.contract_status = "Completed"
