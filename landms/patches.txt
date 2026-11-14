@@ -6,6 +6,7 @@ landms.patches.setup_data.create_roles
 landms.patches.setup_data.create_payment_terms
 landms.patches.recalculate_la_costs_include_je
 landms.patches.backfill_payment_channel
+landms.patches.backfill_forfeiture_journal_order
 landms.patches.backfill_collect_via_tcb
 landms.patches.backfill_receipt_verification_codes
 landms.patches.backfill_stock_entry_plot
