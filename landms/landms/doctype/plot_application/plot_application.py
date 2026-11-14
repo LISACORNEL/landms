@@ -5,6 +5,7 @@ from frappe.utils import add_days, cint, flt, getdate, today
 from landms.landms.doctype.land_acquisition.land_acquisition import (
 	sync_land_acquisition_plot_summary,
 )
+from landms.landms.doctype.plot_application.application_status import set_application_status
 from landms.landms.doctype.plot_master.plot_status import link, set_plot_status
 from landms.sales_order_hooks import build_payment_schedule_rows, build_sales_order_item_row
 
@@ -37,7 +38,7 @@ class PlotApplication(Document):
 			# produces (status=Paid, expiry stamped, plot Pending Advance, SO
 			# auto-created) so the user doesn't need to record a dummy fee PE.
 			payment_date = today()
-			self.db_set("status", "Paid")
+			set_application_status(self, "Paid", "no fee")
 			self.db_set("payment_date", payment_date)
 			self.db_set("expiry_date", add_days(payment_date, int(self.validity_days or 7)))
 			if set_plot_status(
@@ -50,7 +51,7 @@ class PlotApplication(Document):
 			self.create_sales_order(notify=0)
 			return
 
-		self.db_set("status", "Submitted")
+		set_application_status(self, "Submitted")
 		if not self.plot:
 			return
 		if set_plot_status(
@@ -87,7 +88,10 @@ class PlotApplication(Document):
 		if not from_termination and self.status == "Paid":
 			self._cancel_linked_sales_order_if_safe()
 
-		self.db_set("status", "Expired" if reason == "Expired" else "Cancelled")
+		if reason == "Expired":
+			set_application_status(self, "Expired")
+		else:
+			set_application_status(self, "Cancelled", _why_cancelled(self, reason))
 
 	# ------------------------------------------------------------------ #
 	#  Validation helpers                                                  #
@@ -359,7 +363,7 @@ class PlotApplication(Document):
 		self.db_set("payment_date", payment_date)
 		self.db_set("reference_no", reference_no or "")
 		self.db_set("expiry_date", expiry)
-		self.db_set("status", "Paid")
+		set_application_status(self, "Paid", "fee recorded")
 
 		# Lock the plot until first advance is received or the paid window expires.
 		set_plot_status(
@@ -473,3 +477,12 @@ class PlotApplication(Document):
 				alert=True,
 			)
 		return so.name
+
+
+def _why_cancelled(application, reason):
+	"""A few words for the history line when an application is cancelled with something else."""
+	if reason == "Contract Terminated":
+		return "contract terminated"
+	if application.flags.get("from_sales_order_cancel"):
+		return "order cancelled"
+	return ""
