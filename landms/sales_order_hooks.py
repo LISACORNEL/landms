@@ -1552,6 +1552,8 @@ def _post_draft_contract_forfeiture_je(doc):
 			"company": settings.company,
 			"voucher_type": "Journal Entry",
 			"lms_refund_amount": refund_amount,
+			# the journal points back at its order; the order finds it from there
+			"lms_sales_order": doc.name,
 			"user_remark": (
 				f"Sales Order {doc.name} cancelled before Plot Contract was submitted — "
 				f"{forfeiture_pct:.0f}% of paid amount forfeited, "

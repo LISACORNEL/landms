@@ -7,6 +7,7 @@ frappe.ui.form.on("Sales Order", {
     _render_so_close_for_good_button(frm);
     _render_so_registration_banner(frm);
     _render_so_malipopay_banner(frm);
+    _render_so_forfeiture_journals_button(frm);
   },
 
   setup(frm) {
@@ -326,4 +327,17 @@ function _render_so_malipopay_banner(frm, poll) {
       }
     },
   });
+}
+
+// An order's forfeiture journals point back at it; this lists them, cancelled ones included.
+function _render_so_forfeiture_journals_button(frm) {
+  if (!frm.doc.plot || frm.is_new()) return;
+  frm.add_custom_button(
+    __("Forfeiture Journals"),
+    () =>
+      frappe.set_route("List", "Journal Entry", {
+        lms_sales_order: frm.doc.name,
+      }),
+    __("View")
+  );
 }
