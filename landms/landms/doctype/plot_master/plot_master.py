@@ -2,7 +2,6 @@ import frappe
 from frappe.model.document import Document
 from frappe.utils import add_days, cint, flt, getdate, today
 
-from landms.after_submit import drop_rounding_noise_on_locked_fields
 from landms.landms.doctype.land_acquisition.land_acquisition import (
 	sync_land_acquisition_plot_summary,
 )
@@ -20,7 +19,7 @@ class PlotMaster(Document):
 		self.validate_selling_price()
 
 	def validate_land_acquisition(self):
-		"""Plot Master can only hang off an Approved or Subdivided LA."""
+		"""A plot can only belong to an Approved or Subdivided project."""
 		if not self.land_acquisition:
 			return
 		status = frappe.db.get_value("Land Acquisition", self.land_acquisition, "status")
@@ -31,6 +30,7 @@ class PlotMaster(Document):
 			)
 
 	def fill_acquisition_name(self):
+		"""Copy the project's name onto the plot."""
 		if not self.land_acquisition:
 			self.acquisition_name = ""
 			return
@@ -39,8 +39,7 @@ class PlotMaster(Document):
 		)
 
 	def fill_sales_defaults(self):
-		"""Snapshot the sales-default fields from the LA so they survive
-		even if the LA is later edited."""
+		"""Copy the project's sales terms onto the plot, so a later change to the project leaves it alone."""
 		if not self.land_acquisition:
 			self.booking_fee_percent = 0
 			self.government_share_percent = 0
@@ -64,7 +63,7 @@ class PlotMaster(Document):
 		self.selling_price_per_sqm = get_plot_type_selling_rate(self.land_acquisition, self.plot_type)
 
 	def fill_location_coordinates(self):
-		"""If the plot has no coordinates, fall back to the LA's coordinates."""
+		"""A plot without its own point takes the project's."""
 		if not self.land_acquisition:
 			return
 
@@ -84,9 +83,7 @@ class PlotMaster(Document):
 			self.longitude = flt(coords.get("longitude"))
 
 	def fill_financials(self):
-		"""Cost is sourced from the LA's per-sqm cost; selling price from the
-		per-plot-type rate. Both are recomputed every save in case the LA is
-		edited (snapshotting only happens for the cosmetic snapshot fields)."""
+		"""Work out the plot's cost, price and fees; a submitted plot keeps the ones it was submitted with."""
 		if not self.land_acquisition:
 			self.cost_per_sqm = 0
 			self.allocated_cost = 0
@@ -103,16 +100,21 @@ class PlotMaster(Document):
 		if flt(la.acquisition_cost_tzs) > 0 and total_sqm > 0:
 			self.cost_per_sqm = flt(la.get("cost_per_sqm_tzs")) or (flt(la.acquisition_cost_tzs) / total_sqm)
 			if plot_sqm > 0:
-				self.allocated_cost = self.cost_per_sqm * plot_sqm
+				self.allocated_cost = self._as_stored("allocated_cost", self.cost_per_sqm * plot_sqm)
 
 		if flt(self.selling_price_per_sqm) > 0 and plot_sqm > 0:
-			self.selling_price = flt(self.selling_price_per_sqm) * plot_sqm
+			self.selling_price = self._as_stored("selling_price", flt(self.selling_price_per_sqm) * plot_sqm)
 		else:
 			self.selling_price = 0
 
 		self._fill_govt_fees(plot_sqm)
 
+	def _as_stored(self, fieldname, value):
+		"""The value at the field's own precision, so the form and the database hold the same number."""
+		return flt(value, self.precision(fieldname))
+
 	def _fill_govt_fees(self, plot_sqm):
+		"""Work out the government fees from the plot's size, type and price."""
 		land_rent_rate = flt(frappe.db.get_value("Plot Type", self.plot_type, "land_rent_rate"))
 		settings = frappe.get_single("LandMS Settings")
 		appl = flt(settings.govt_appl_fee_amount) or 5000
@@ -120,30 +122,36 @@ class PlotMaster(Document):
 		prem_rate = flt(settings.govt_premium_rate) or 0.0025
 
 		self.land_rent_rate = land_rent_rate
-		self.land_rent = flt(land_rent_rate * plot_sqm)
+		self.land_rent = self._as_stored("land_rent", land_rent_rate * plot_sqm)
 		self.govt_application_fee = appl
-		self.premium = flt(prem_rate * flt(self.selling_price))
-		self.registration_prep_fee = flt(0.2 * self.land_rent)
+		self.premium = self._as_stored("premium", prem_rate * flt(self.selling_price))
+		self.registration_prep_fee = self._as_stored("registration_prep_fee", 0.2 * self.land_rent)
 		self.govt_registration_fee = reg_fee
-		self.stamp_duty = flt(((self.land_rent - 2000) / 20) + 500) if self.land_rent > 0 else 0
-		self.total_govt_fees = flt(
+		self.stamp_duty = (
+			self._as_stored("stamp_duty", ((self.land_rent - 2000) / 20) + 500) if self.land_rent > 0 else 0
+		)
+		self.total_govt_fees = self._as_stored(
+			"total_govt_fees",
 			self.govt_application_fee
 			+ self.premium
 			+ self.land_rent
 			+ self.registration_prep_fee
 			+ self.govt_registration_fee
-			+ self.stamp_duty
+			+ self.stamp_duty,
 		)
-		self.total_plot_amount = flt(self.selling_price) + self.total_govt_fees
+		self.total_plot_amount = self._as_stored(
+			"total_plot_amount", flt(self.selling_price) + self.total_govt_fees
+		)
 
 	def validate_coordinate_pair(self):
-		"""Either both lat/lon are set, or both are blank."""
+		"""Latitude and longitude come together or not at all."""
 		has_lat = self.latitude not in (None, "", 0)
 		has_lon = self.longitude not in (None, "", 0)
 		if has_lat != has_lon:
 			frappe.throw("Latitude and Longitude must be provided together.")
 
 	def validate_duplicate_plot_number(self):
+		"""A plot number is used once per project."""
 		if not self.plot_number or not self.land_acquisition:
 			return
 		existing = frappe.db.get_value(
@@ -163,6 +171,7 @@ class PlotMaster(Document):
 			)
 
 	def validate_selling_price(self):
+		"""A plot needs a selling rate for its type and a price above zero."""
 		if flt(self.selling_price_per_sqm) <= 0:
 			frappe.throw(
 				f"No selling rate found for plot type '{self.plot_type}' on "
@@ -176,34 +185,24 @@ class PlotMaster(Document):
 		self.create_stock_entry()
 		sync_land_acquisition_plot_summary(self.land_acquisition)
 
-	# ------------------------------------------------------------------ #
-	#  The 90-day tick (No Advance Deadline) on a submitted plot           #
-	# ------------------------------------------------------------------ #
-
 	def before_update_after_submit(self):
-		# The form can hold the plot's money fields with more decimals than are
-		# stored, which made Frappe refuse the save (live, 13 Oct 2026).
-		drop_rounding_noise_on_locked_fields(self)
+		"""Note whether the 90-day tick changed, and refuse an untick that would expire an order tonight."""
 		stored_tick = cint(frappe.db.get_value("Plot Master", self.name, "no_advance_deadline"))
 		self.flags.tick_changed = stored_tick != cint(self.no_advance_deadline)
 		if self.flags.tick_changed and not cint(self.no_advance_deadline):
 			self._refuse_untick_that_would_expire_an_order()
 
 	def on_update_after_submit(self):
+		"""Let the plot's live applications follow a changed tick."""
 		if self.flags.tick_changed:
 			self._update_live_application_windows()
 
 	def _refuse_untick_that_would_expire_an_order(self):
-		"""Without the tick a paid application gets the standard advance window
-		again. If that window is over, tonight's run would expire the order at
-		once — refuse instead (the same check the console script made).
-
-		The run starts at 01:00, already on the next day, so a window ending
-		today is also over by then: hence <= (the run expires window_end < its
-		day, i.e. window_end <= today)."""
+		"""Refuse when the standard window of a paid application is already over."""
 		standard = _standard_advance_days()
 		for app in _paid_applications_on(self.name):
 			window_end = add_days(app.payment_date, standard)
+			# the night run starts after midnight, so a window ending today is over by then
 			if getdate(window_end) <= getdate(today()) and not _has_running_contract(app.sales_order):
 				frappe.throw(
 					f"The 90-day tick cannot be removed from {self.plot_number or self.name}: application "
@@ -212,8 +211,7 @@ class PlotMaster(Document):
 				)
 
 	def _update_live_application_windows(self):
-		"""Live applications on this plot follow the tick: validity days and the
-		expiry date shown on the application, as when the application was made."""
+		"""Give the plot's live applications the validity days and expiry date the tick now means."""
 		days = _advance_days_for(self)
 		for app in _live_applications_on(self.name):
 			values = {"validity_days": days}
@@ -226,9 +224,7 @@ class PlotMaster(Document):
 		sync_land_acquisition_plot_summary(self.land_acquisition)
 
 	def create_stock_entry(self):
-		"""Create a Material Receipt Stock Entry that moves `allocated_cost`
-		from the Land Under Development account into the Plot Inventory
-		warehouse, against a freshly minted Serial No tied to this plot."""
+		"""Receive the plot into stock at its allocated cost, under a serial number named after the plot."""
 		settings = frappe.get_single("LandMS Settings")
 
 		item_code = get_plot_item_code(self.plot_type)
@@ -241,13 +237,10 @@ class PlotMaster(Document):
 		if not land_account:
 			frappe.throw("Land Under Development Account is not set in LandMS Settings.")
 
-		# Use the plot name (e.g. PLT-2026-0001) as the serial number — globally
-		# unique and lets the plot ↔ serial ↔ stock-entry chain be traced by name.
+		# the plot's own name is the serial number, so plot, serial and stock entry trace by name
 		serial_number = self.name
 
-		# Pre-create the Serial No record. ERPNext's validate_serialized_batch()
-		# runs on Stock Entry insert (i.e. *before* on_submit), so the Serial No
-		# must already exist by the time we hand it to the SE.
+		# ERPNext checks the serial number when the stock entry is inserted, so it must exist first
 		if not frappe.db.exists("Serial No", serial_number):
 			frappe.get_doc(
 				{
@@ -284,6 +277,7 @@ class PlotMaster(Document):
 		)
 
 	def cancel_stock_entry(self):
+		"""Cancel the plot's stock receipt and clear the plot's pointers to it."""
 		if not self.stock_entry:
 			return
 		se = frappe.get_doc("Stock Entry", self.stock_entry)
@@ -294,18 +288,19 @@ class PlotMaster(Document):
 
 
 def _standard_advance_days():
+	"""The site-wide number of days an application has to pay its advance."""
 	return cint(frappe.db.get_single_value("LandMS Settings", "application_fee_validity_days") or 7)
 
 
 def _advance_days_for(plot):
-	"""The advance window a plot's applications get — the same rule as
-	PlotApplication.fill_fee_from_settings and the nightly expiry."""
+	"""The advance window a plot's applications get: the plot's own days when ticked, else the standard."""
 	if cint(plot.no_advance_deadline) and cint(plot.payment_completion_days) > 0:
 		return cint(plot.payment_completion_days)
 	return _standard_advance_days()
 
 
 def _paid_applications_on(plot_name):
+	"""The plot's submitted applications that have paid their fee."""
 	return frappe.get_all(
 		"Plot Application",
 		filters={"plot": plot_name, "docstatus": 1, "status": "Paid", "payment_date": ["is", "set"]},
@@ -314,6 +309,7 @@ def _paid_applications_on(plot_name):
 
 
 def _live_applications_on(plot_name):
+	"""The plot's submitted applications that are still open."""
 	return frappe.get_all(
 		"Plot Application",
 		filters={"plot": plot_name, "docstatus": 1, "status": ["in", ["Submitted", "Paid"]]},
@@ -322,13 +318,14 @@ def _live_applications_on(plot_name):
 
 
 def _has_running_contract(sales_order):
+	"""True when the order already has a submitted contract."""
 	return bool(sales_order) and bool(
 		frappe.db.exists("Plot Contract", {"sales_order": sales_order, "docstatus": 1})
 	)
 
 
 def get_plot_item_code(plot_type):
-	"""Return the stock item code for the given plot type from the Plot Type doctype."""
+	"""The stock item of a plot type."""
 	if not plot_type:
 		frappe.throw("Plot Type is required.")
 	item_code = frappe.db.get_value("Plot Type", plot_type, "item_code")
@@ -341,7 +338,7 @@ def get_plot_item_code(plot_type):
 
 
 def get_plot_type_selling_rate(land_acquisition, plot_type):
-	"""Look up the per-sqm selling rate for the given plot type from the LA's rate table."""
+	"""The project's selling rate per sqm for a plot type, or 0 when it has none."""
 	if not land_acquisition or not plot_type:
 		return 0
 	result = frappe.db.get_value(
@@ -364,12 +361,7 @@ def _build_plot_stock_entry_doc(
 	difference_account: str,
 	plot: str,
 ) -> dict:
-	"""Build the Stock Entry payload used when a plot enters inventory.
-
-	The plot items use a delivery-side item default expense account (COGS) for
-	handover. Plot creation must not inherit that value; it needs to post against
-	the Land Under Development asset account instead.
-	"""
+	"""The stock receipt for a new plot, posted against Land Under Development, not the item's sales cost account."""
 	return {
 		"doctype": "Stock Entry",
 		"stock_entry_type": "Material Receipt",
@@ -388,7 +380,7 @@ def _build_plot_stock_entry_doc(
 				"t_warehouse": target_warehouse,
 				"serial_no": serial_number,
 				"use_serial_batch_fields": 1,
-				# Prevent Stock Entry from inheriting the item default COGS account.
+				# without this the stock entry takes the item's default sales cost account
 				"expense_account": difference_account,
 			}
 		],

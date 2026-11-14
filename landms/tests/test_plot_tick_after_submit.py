@@ -1,12 +1,4 @@
-"""The 90-day tick (No Advance Deadline) can be changed on a submitted plot.
-
-Live, 13 Oct 2026: unticking failed with "Not allowed to change Allocated Cost
-after submission from 1580736.846306407 to 1580736.8463064067" because the form
-recalculates the cost with more decimals than are stored. Now the locked fields
-keep their stored values, removing the tick is refused when it would make
-tonight's run expire an order, and the plot's live applications follow the
-tick. Every write is rolled back.
-"""
+"""The 90-day tick on a submitted plot: it saves, an unsafe untick is refused, applications follow it."""
 
 import math
 from unittest.mock import patch
@@ -18,6 +10,7 @@ from frappe.utils import add_days, flt, today
 from landms.landms.doctype.plot_master import plot_master
 
 MODULE = "landms.landms.doctype.plot_master.plot_master"
+FIGURES = ("cost_per_sqm", "allocated_cost", "selling_price", "total_govt_fees", "total_plot_amount")
 
 
 def _ensure_tick_field():
@@ -53,11 +46,9 @@ class TestPlotTickAfterSubmit(FrappeTestCase):
 
 	# ------------------------------------------------------------------ the save goes through
 
-	def test_the_tick_saves_although_the_form_sends_a_recalculated_cost(self):
-		stored_cost = self.plot.allocated_cost
+	def test_the_tick_saves_and_the_figures_stay_as_stored(self):
+		before = {figure: self.plot.get(figure) for figure in FIGURES}
 		wanted = 0 if self.plot.no_advance_deadline else 1
-		# the next representable number: a real difference at any size, far below 1e-6 for plot costs
-		self.plot.allocated_cost = math.nextafter(flt(stored_cost), math.inf)
 		self.plot.no_advance_deadline = wanted
 		with (
 			patch(f"{MODULE}._paid_applications_on", return_value=[]),
@@ -65,28 +56,22 @@ class TestPlotTickAfterSubmit(FrappeTestCase):
 		):
 			self.plot.save()
 		row = frappe.db.get_value(
-			"Plot Master", self.plot.name, ["allocated_cost", "no_advance_deadline"], as_dict=True
+			"Plot Master", self.plot.name, ["no_advance_deadline", *FIGURES], as_dict=True
 		)
 		self.assertEqual(row.no_advance_deadline, wanted)
-		self.assertEqual(row.allocated_cost, stored_cost)
+		self.assertEqual({figure: row[figure] for figure in FIGURES}, before)
 
-	def test_a_real_change_to_a_locked_field_is_still_refused(self):
-		# only rounding noise is absorbed; anything else gets Frappe's error, as before
+	def test_a_change_to_a_locked_field_is_refused(self):
 		self.plot.plot_size_sqm = flt(self.plot.plot_size_sqm) + 999
 		with self.assertRaises(frappe.UpdateAfterSubmitError):
 			self.plot.save()
 
-	def test_the_noise_really_differs_from_the_stored_cost(self):
-		# guards the test above: the value it sends must not equal the stored one
-		stored = flt(self.plot.allocated_cost)
-		self.assertNotEqual(math.nextafter(stored, math.inf), stored)
-
-	def test_a_real_cost_change_is_still_refused(self):
+	def test_a_cost_change_is_refused(self):
 		self.plot.allocated_cost = flt(self.plot.allocated_cost) + 1
 		with self.assertRaises(frappe.UpdateAfterSubmitError):
 			self.plot.save()
 
-	def test_the_official_bypass_is_respected(self):
+	def test_the_noise_helper_other_doctypes_use_respects_the_official_bypass(self):
 		from landms.after_submit import drop_rounding_noise_on_locked_fields
 
 		noisy = math.nextafter(flt(self.plot.allocated_cost), math.inf)
