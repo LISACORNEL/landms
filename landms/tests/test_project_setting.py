@@ -5,7 +5,8 @@ log series. A new project gets its record empty; the project cannot be approved 
 marked * is empty (0 counts as empty for the days and the forfeiture %, not for the fee amount);
 the government fees are informational and never block. Projects that existed before get an exact
 copy of LandMS Settings from the patch. Deleting a draft project deletes its record. The record is
-hidden and only System Manager and Finance may change it. LandMS Settings itself is left as it is.
+searchable, never made by hand, and only System Manager and Finance may change it. LandMS Settings
+itself is left as it is.
 
 Safety (operator, 5 Nov 2026: "we don't want to break the production data"): every write is
 rolled back, and a database commit or an outside call (bank, SMS, email gateway) fails the test.
@@ -18,6 +19,7 @@ from frappe.model import no_value_fields
 from frappe.model.workflow import apply_workflow, get_transitions, get_workflow_name
 from frappe.tests.utils import FrappeTestCase
 from frappe.utils import today
+from frappe.utils.user import UserPermissions
 
 from landms.landms.doctype.landms_project_setting.landms_project_setting import (
 	accounts_for,
@@ -63,6 +65,18 @@ def _no_outside_call(*args, **kwargs):
 
 def _value_fields(doctype):
 	return [df for df in frappe.get_meta(doctype).fields if df.fieldtype not in no_value_fields]
+
+
+def _searchable(user):
+	"""The record types this user's search bar offers (Frappe builds it for the logged-in user)."""
+	current = frappe.session.user
+	frappe.set_user(user)
+	try:
+		permissions = UserPermissions(user)
+		permissions.build_permissions()
+		return permissions.can_search
+	finally:
+		frappe.set_user(current)
 
 
 class TestProjectSettings(FrappeTestCase):
@@ -234,9 +248,9 @@ class TestProjectSettings(FrappeTestCase):
 		with self.assertRaisesRegex(frappe.ValidationError, "has no settings yet"):
 			accounts_for("LACQ-NO-SUCH-PROJECT")
 
-	def test_hidden_and_finance_owned(self):
+	def test_searchable_never_made_by_hand_and_finance_owned(self):
 		meta = frappe.get_meta(SETTINGS)
-		self.assertTrue(meta.read_only, "must not be searchable")
+		self.assertFalse(meta.read_only, "must be searchable")
 		self.assertTrue(meta.in_create, "must not be created by hand")
 		self.assertFalse(frappe.db.exists("Workspace Link", {"link_to": SETTINGS}))
 		self.assertFalse(any(p.create or p.delete for p in meta.permissions))
@@ -250,6 +264,9 @@ class TestProjectSettings(FrappeTestCase):
 		self.assertTrue(frappe.has_permission(SETTINGS, "read", doc=record, user=accounts))
 		self.assertFalse(frappe.has_permission(SETTINGS, "write", doc=record, user=accounts))
 		self.assertFalse(frappe.has_permission(SETTINGS, "read", doc=record, user=sales))
+		self.assertIn(SETTINGS, _searchable(finance))
+		self.assertIn(SETTINGS, _searchable(accounts))
+		self.assertNotIn(SETTINGS, _searchable(sales))
 
 	def test_changing_an_account_after_postings_is_said_out_loud(self):
 		if not frappe.db.has_column("GL Entry", "land_acquisition"):

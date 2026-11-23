@@ -5,7 +5,6 @@
  "autoname": "field:land_acquisition",
  "naming_rule": "By fieldname",
  "title_field": "project_name",
- "read_only": 1,
  "in_create": 1,
  "track_changes": 1,
  "allow_import": 0,

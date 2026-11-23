@@ -7,7 +7,7 @@ Named after its project, so there is exactly one per project. A new project gets
 empty and Finance fills it; the project cannot be approved while a field marked * is empty.
 The government fees are informational (shown on plot documents, never posted). Projects that
 existed before LA-7 get an exact copy of LandMS Settings (patch create_project_settings).
-Not searchable and in no workspace: opened from the project's Connections. Code reads it only
+Found by search or from the project's Connections; in no workspace. Code reads it only
 through accounts_for(project).
 
 LandMS Settings stays as it is: later cards move each reader to accounts_for, one place at a
