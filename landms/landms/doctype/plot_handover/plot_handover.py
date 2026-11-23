@@ -129,7 +129,6 @@ class PlotHandover(Document):
 
 		dn.insert(ignore_permissions=True)
 		dn.submit()
-		frappe.db.commit()
 		return dn.name
 
 	def _make_delivery_note_from_sales_order(self, sales_order_name, plot):
