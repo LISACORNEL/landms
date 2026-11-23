@@ -97,6 +97,7 @@ class PlotHandover(Document):
 			if dn.docstatus == 1:
 				return dn.name
 			if dn.docstatus == 0:
+				dn.plot_handover = self.name
 				dn.submit()
 				return dn.name
 
@@ -120,6 +121,8 @@ class PlotHandover(Document):
 		dn.posting_date = self.handover_date or today()
 		dn.set_posting_time = 1
 		dn.remarks = f"Plot handover {self.name} for contract {self.contract} / plot {self.plot}"
+		# the delivery note points back at its handover; the handover shows it under Connections
+		dn.plot_handover = self.name
 
 		# Override expense account and cost center on all items.
 		# COGS must post to Cost of Land Sold; cost center from LandMS Settings.
