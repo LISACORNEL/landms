@@ -243,6 +243,17 @@
    "type": "Link"
   },
   {
+   "dependencies": "",
+   "hidden": 0,
+   "is_query_report": 1,
+   "label": "LandMS Bank Reference Search",
+   "link_count": 0,
+   "link_to": "LandMS Bank Reference Search",
+   "link_type": "Report",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
    "hidden": 0,
    "is_query_report": 0,
    "label": "LandMS Settings",
