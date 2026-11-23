@@ -5,6 +5,7 @@ from frappe.utils import add_days, cint, flt, getdate, today
 from landms.landms.doctype.land_acquisition.land_acquisition import (
 	sync_land_acquisition_plot_summary,
 )
+from landms.landms.doctype.landms_project_setting.landms_project_setting import accounts_for
 from landms.landms.doctype.plot_master.plot_status import link, set_plot_status
 from landms.sales_order_hooks import build_payment_schedule_rows, build_sales_order_item_row
 
@@ -146,7 +147,9 @@ class PlotApplication(Document):
 			self.acquisition_name = frappe.db.get_value("Land Acquisition", la, "acquisition_name") or ""
 
 	def fill_fee_from_settings(self):
-		settings = frappe.get_single("LandMS Settings")
+		if not self.land_acquisition:
+			return
+		settings = accounts_for(self.land_acquisition)
 		self.application_fee = flt(settings.application_fee_amount)
 		self.unpaid_validity_days = int(settings.unpaid_application_expiry_days or 3)
 		self.validity_days = int(settings.application_fee_validity_days or 7)
@@ -289,11 +292,11 @@ class PlotApplication(Document):
 				"not ready for application fee payment."
 			)
 
-		settings = frappe.get_single("LandMS Settings")
+		settings = accounts_for(self.land_acquisition)
 		bank_account = bank_account or settings.application_fee_receiving_account
 		if not bank_account:
 			frappe.throw(
-				"Application Fee Receiving Account is not configured in LandMS Settings. "
+				"Application Fee Receiving Account is not set in the project's settings. "
 				"Set it first, or select a Bank/Cash account while recording payment."
 			)
 		fee_amount = flt(self.application_fee)
@@ -303,7 +306,7 @@ class PlotApplication(Document):
 
 		# --- Sales Invoice ---
 		if not settings.application_fee_item:
-			frappe.throw("Application Fee Item is not configured in LandMS Settings.")
+			frappe.throw("Application Fee Item is not set in the project's settings.")
 
 		si = frappe.get_doc(
 			{
@@ -424,8 +427,8 @@ class PlotApplication(Document):
 		if self.expiry_date and getdate(self.expiry_date) < getdate(today()):
 			frappe.throw("This application has expired. The plot reservation is no longer valid.")
 
-		settings = frappe.get_single("LandMS Settings")
 		plot = frappe.get_doc("Plot Master", self.plot)
+		settings = accounts_for(plot.land_acquisition)
 
 		payment_completion_days = cint(plot.payment_completion_days or 0)
 		if payment_completion_days <= 0:

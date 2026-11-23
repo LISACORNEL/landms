@@ -104,7 +104,7 @@ function open_fee_payment_dialog(frm) {
           options: "Account",
           default: defaultBankAccount || "",
           description: __(
-            "Defaults from LandMS Settings (Application Fee Receiving Account)."
+            "Defaults from the project's settings (Application Fee Receiving Account)."
           ),
           get_query() {
             return {
@@ -148,8 +148,8 @@ function open_fee_payment_dialog(frm) {
 
   frappe.db
     .get_value(
-      "LandMS Settings",
-      "LandMS Settings",
+      "LandMS Project Setting",
+      frm.doc.land_acquisition,
       "application_fee_receiving_account"
     )
     .then((r) =>
