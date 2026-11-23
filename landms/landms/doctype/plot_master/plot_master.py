@@ -5,6 +5,14 @@ from frappe.utils import add_days, cint, flt, getdate, today
 from landms.landms.doctype.land_acquisition.land_acquisition import (
 	sync_land_acquisition_plot_summary,
 )
+from landms.landms.doctype.landms_project_setting.landms_project_setting import SETTINGS, accounts_for
+
+# the figures used when neither the project nor LandMS Settings has one
+USUAL_GOVERNMENT_FEES = {
+	"govt_appl_fee_amount": 5000,
+	"govt_registration_fee_amount": 25000,
+	"govt_premium_rate": 0.0025,
+}
 
 
 class PlotMaster(Document):
@@ -116,10 +124,10 @@ class PlotMaster(Document):
 	def _fill_govt_fees(self, plot_sqm):
 		"""Work out the government fees from the plot's size, type and price."""
 		land_rent_rate = flt(frappe.db.get_value("Plot Type", self.plot_type, "land_rent_rate"))
-		settings = frappe.get_single("LandMS Settings")
-		appl = flt(settings.govt_appl_fee_amount) or 5000
-		reg_fee = flt(settings.govt_registration_fee_amount) or 25000
-		prem_rate = flt(settings.govt_premium_rate) or 0.0025
+		fees = government_fee_figures(self.land_acquisition)
+		appl = fees["govt_appl_fee_amount"]
+		reg_fee = fees["govt_registration_fee_amount"]
+		prem_rate = fees["govt_premium_rate"]
 
 		self.land_rent_rate = land_rent_rate
 		self.land_rent = self._as_stored("land_rent", land_rent_rate * plot_sqm)
@@ -285,6 +293,16 @@ class PlotMaster(Document):
 			se.cancel()
 		self.db_set("stock_entry", None)
 		self.db_set("serial_no", None)
+
+
+def government_fee_figures(land_acquisition):
+	"""The project's government fee figures; an empty one falls back to LandMS Settings, then to the usual figure."""
+	project = accounts_for(land_acquisition) if frappe.db.exists(SETTINGS, land_acquisition or "") else None
+	site = frappe.get_cached_doc("LandMS Settings")
+	return {
+		field: flt(project and project.get(field)) or flt(site.get(field)) or usual
+		for field, usual in USUAL_GOVERNMENT_FEES.items()
+	}
 
 
 def _standard_advance_days():
